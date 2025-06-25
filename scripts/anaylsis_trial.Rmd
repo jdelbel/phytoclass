@@ -1,0 +1,188 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#Loading packages
+library(phytoclass)
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(here)
+```
+
+```{r}
+#Load data - eventually download using API?
+h <- read.csv(here("files", "2025-06-23_HakaiData_hplc.csv"))
+
+min_max <- read.csv(here("outputs", "min_max_v1.csv"))
+```
+
+```{r}
+#Wrangling the data to prepare it for analysis
+
+#Select data that will be analyzed, rename columns and drop any rows with NAs
+h2 <- h %>%
+  filter(line_out_depth == 5 & site_id == "QU39" & analyzing_lab == "USC") %>% 
+  select(date,
+         site_id,
+         depth = line_out_depth,
+         C12 = chl_c1_c2, #
+         Per = peri, #
+         X19but = X_19_but,
+         Fuco = fuco,
+         X19hex = X_19_hex,
+         Pra = prasinoxanthin,
+         Allo = alloxanthin,
+         Zea = zeaxanthin,
+         Chl_b = chl_b,
+         Tchla = all_chl_a) %>% 
+  drop_na() %>% 
+  group_by(date) %>% 
+  mutate(n = row_number()) %>% 
+  ungroup() %>% 
+  unite(id, c(date, site_id, depth, n), sep = "-")
+
+h2 <- as.data.frame(h2)
+
+rownames(h2) <- h2$id
+
+data_matrix <- h2 %>% 
+  select(-id)
+
+cat("Make sure that selected pigments and abbreviations match those in the pigment and min/max matrices")
+```
+
+```{r}
+#Creating input pigment ratio matrix
+pigment_matrix <- data.frame(
+  C12  =    c(0, 0, 1, 0, 0, 0, 0),
+  Per =     c(0, 0, 0, 1, 0, 0, 0),
+  X19but =  c(0, 0, 0, 0, 1, 1, 0),
+  Fuco =    c(0, 0, 1, 0, 1, 1, 0),
+  Pra =     c(1, 0, 0, 0, 0, 0, 0),
+  X19hex =  c(0, 0, 0, 0, 1, 0, 0),
+  Allo =    c(0, 1, 0, 0, 0, 0, 0),
+  Zea =     c(1, 0, 0, 0, 0, 0, 1),
+  Chl_b =   c(1, 0, 0, 0, 0, 0, 0),
+  Tchla =   c(1, 1, 1, 1, 1, 1, 1)
+)
+
+#Setting row names
+rownames(pigment_matrix) <- c(
+  "Prasinophytes", #1
+  "Cryptophytes", #2
+  "D1", #3
+  "Dinoflagellates-1", #4
+  "Haptophytes", #5
+  "Dictyophytes", #6
+  "Cyanobacteria" #7
+)
+
+#Since I will likely be comparing different methods, I think that doing this in an excel template would probably be easier. Maybe not.
+```
+
+```{r}
+# Get clusters and remove Clust column
+clusters <- lapply(Cluster(data_matrix, min_cluster_size = 14)$cluster.list, 
+                   function(x) { x$Clust <- NULL; x })
+
+# Add the full dataset as the first element
+full_data <- data_matrix
+full_data$Clust <- NULL  # Remove cluster column if it exists
+clusters <- c(list(full_data), clusters)
+
+# Create names including full dataset
+names(clusters) <- c("full_dataset", paste0("clust", seq_along(clusters[-1])))
+list2env(clusters, envir = .GlobalEnv)
+
+# Now you have full_dataset, clust1, clust2, clust3, etc. as separate dataframes
+```
+
+```{r}
+# Set seed once for reproducibility
+set.seed(7683)
+
+# Run analysis on full dataset and all clusters
+results_list <- list()
+for(i in seq_along(clusters)) {
+  dataset_name <- names(clusters)[i]
+  cat("Processing", dataset_name, "(", i, "of", length(clusters), ")\n")
+  
+  results_list[[i]] <- simulated_annealing(
+    S = clusters[[i]], 
+    F = pigment_matrix,
+    user_defined_min_max = min_max,
+    do_matrix_checks = TRUE,
+    niter = 1,
+    step = 0.01,
+    weight.upper.bound = 30
+  )
+  
+  names(results_list)[i] <- dataset_name
+}
+```
+
+
+
+
+```{r}
+# Extract RMSE and condition number from results
+cluster_summary <- data.frame(
+  dataset = names(results_list),
+  RMSE = sapply(results_list, function(x) x$RMSE),
+  condition_number = sapply(results_list, function(x) x$`condition number`)
+) %>%
+  # Add a column to distinguish full dataset from clusters
+  mutate(
+    type = ifelse(dataset == "full_dataset", "Full Dataset", "Cluster"),
+    sample_size = sapply(clusters, nrow)
+  ) %>%
+  # Order with full dataset first, then clusters by RMSE
+  arrange(type == "Cluster", RMSE)
+
+print(cluster_summary)
+
+# Save as CSV
+write.csv(cluster_summary, here("summaries", "cluster_analysis_summary_full.csv"),
+          row.names = FALSE)
+```
+
+```{r}
+# Scatter plot showing both metrics
+ggplot(cluster_summary, aes(x = RMSE, y = condition_number, color = dataset)) +
+  geom_point(size = 4) +
+  geom_text(aes(label = dataset), vjust = -0.5) +
+  theme_minimal() +
+  labs(title = "RMSE vs Condition Number by Cluster",
+       x = "RMSE", 
+       y = "Condition Number") +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Create comparison plot
+ggplot(cluster_summary, aes(x = reorder(dataset, RMSE), y = RMSE, fill = type)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Full Dataset" = "darkblue", "Cluster" = "lightblue")) +
+  theme_minimal() +
+  labs(title = "RMSE Comparison: Full Dataset vs Clusters",
+       x = "Dataset", y = "RMSE", fill = "Type") +
+  geom_text(aes(label = round(RMSE, 3)), hjust = -0.1, size = 3)
+```
+
+Ok, here struggling to pull out the results from each cluster and combine them and not making much headway with Claude.
+
+
+
+
+
+
+
+
+
+
+
