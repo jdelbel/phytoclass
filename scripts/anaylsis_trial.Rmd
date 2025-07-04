@@ -9,28 +9,68 @@ library(phytoclass)
 library(readxl)
 library(dplyr)
 library(tidyr)
+library(lubridate)
 library(ggplot2)
+library(forcats)
 library(here)
+library(purrr)
 ```
+
+---
+Functions
+---
+
+```{r}
+# Extract class abundances from phytoclass analysis from all clusters into a single dataframe
+
+# Method 1: Using purrr and dplyr (recommended)
+extract_class_abundances <- function(results_list) {
+  # Extract class abundances with cluster names
+  class_abundances_combined <- map_dfr(names(results_list), function(cluster_name) {
+    # Get the class abundances for this cluster
+    abundances <- results_list[[cluster_name]]$`Class abundances`
+    
+    # Convert rownames to a column BEFORE combining (this preserves original sample IDs)
+    abundances$sample_id <- rownames(abundances)
+    
+    # Add cluster identifier
+    abundances$cluster <- cluster_name
+    
+    return(abundances)
+  })
+  
+  # Reorder columns to put identifiers first
+  class_abundances_combined <- class_abundances_combined %>%
+    select(cluster, sample_id, everything())
+  
+  return(class_abundances_combined)
+}
+```
+
+---
+Download data and wrangling
+---
 
 ```{r}
 #Load data - eventually download using API?
 h <- read.csv(here("files", "2025-06-23_HakaiData_hplc.csv"))
 
+#Pigment minimum and maximum observed ratios from Higgens. 
 min_max <- read.csv(here("outputs", "min_max_v1.csv"))
 ```
 
 ```{r}
 #Wrangling the data to prepare it for analysis
 
-#Select data that will be analyzed, rename columns and drop any rows with NAs
+#Select the data and pigments that will be analyzed with phytoclass
+# rename columns for analysis and drop any rows with NAs
 h2 <- h %>%
   filter(line_out_depth == 5 & site_id == "QU39" & analyzing_lab == "USC") %>% 
   select(date,
          site_id,
          depth = line_out_depth,
-         C12 = chl_c1_c2, #
-         Per = peri, #
+         C12 = chl_c1_c2,
+         Per = peri,
          X19but = X_19_but,
          Fuco = fuco,
          X19hex = X_19_hex,
@@ -40,25 +80,34 @@ h2 <- h %>%
          Chl_b = chl_b,
          Tchla = all_chl_a) %>% 
   drop_na() %>% 
+  # Calculate daily averages across all pigments - need here as can cause errors with clustering
+  group_by(date, site_id, depth) %>%
+  summarise(across(C12:Tchla, ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+  # Add row numbers and create ID after averaging
   group_by(date) %>% 
   mutate(n = row_number()) %>% 
   ungroup() %>% 
-  unite(id, c(date, site_id, depth, n), sep = "-")
+  unite(id, c(date, site_id, depth, n), sep = "-", remove = FALSE) #Create unique id for later joining
 
-h2 <- as.data.frame(h2)
+#Making the unique ids the rowname as can only have data for analysis and need information for later joining metadata back in
+h3 <- as.data.frame(h2) 
 
-rownames(h2) <- h2$id
+rownames(h3) <- h3$id
 
-data_matrix <- h2 %>% 
-  select(-id)
+#Creating data matrix for analysis
+data_matrix <- h3 %>% 
+  select(C12:Tchla)
 
-cat("Make sure that selected pigments and abbreviations match those in the pigment and min/max matrices")
+#Creating metadata column to join back with data later.
+metadata <- h3 %>% 
+  select(id:depth) %>% 
+  rename(sample_id = id)
 ```
 
 ```{r}
-#Creating input pigment ratio matrix
+#Creating input pigment ratio matrix - this could also be done in excel and uploaded.
 pigment_matrix <- data.frame(
-  C12  =    c(0, 0, 1, 0, 0, 0, 0),
+  C12  =    c(0, 1, 1, 1, 1, 1, 0),
   Per =     c(0, 0, 0, 1, 0, 0, 0),
   X19but =  c(0, 0, 0, 0, 1, 1, 0),
   Fuco =    c(0, 0, 1, 0, 1, 1, 0),
@@ -84,17 +133,36 @@ rownames(pigment_matrix) <- c(
 #Since I will likely be comparing different methods, I think that doing this in an excel template would probably be easier. Maybe not.
 ```
 
+As soon as I make changes to min-max it fails. It could be some sort of small error, but this is crazy. It's almost harder than CHEMTAX.
+
+
 ```{r}
+# Check pigment name matching
+pigment_names_data <- colnames(pigment_matrix)
+pigment_names_minmax <- rownames(min_max)  # or whatever column contains pigment names
+
+cat("Pigments in data but not in min_max:\n")
+print(setdiff(pigment_names_data, pigment_names_minmax))
+
+cat("Pigments in min_max but not in data:\n")
+print(setdiff(pigment_names_minmax, pigment_names_data))
+```
+
+
+
+```{r}
+#Performs recommended clustering to group data with similar pigment ratios
+
 # Get clusters and remove Clust column
 clusters <- lapply(Cluster(data_matrix, min_cluster_size = 14)$cluster.list, 
                    function(x) { x$Clust <- NULL; x })
 
-# Add the full dataset as the first element
+# Add the full dataset as the first element so unclustered results can be compared to clustered.
 full_data <- data_matrix
 full_data$Clust <- NULL  # Remove cluster column if it exists
 clusters <- c(list(full_data), clusters)
 
-# Create names including full dataset
+# Create names for each cluster in list including full dataset
 names(clusters) <- c("full_dataset", paste0("clust", seq_along(clusters[-1])))
 list2env(clusters, envir = .GlobalEnv)
 
@@ -105,7 +173,7 @@ list2env(clusters, envir = .GlobalEnv)
 # Set seed once for reproducibility
 set.seed(7683)
 
-# Run analysis on full dataset and all clusters
+# Run phytoclass analysis on full dataset and all clusters independently
 results_list <- list()
 for(i in seq_along(clusters)) {
   dataset_name <- names(clusters)[i]
@@ -116,7 +184,7 @@ for(i in seq_along(clusters)) {
     F = pigment_matrix,
     user_defined_min_max = min_max,
     do_matrix_checks = TRUE,
-    niter = 1,
+    niter = 1, #Kept at one for initial analysis - recommended to be 500.
     step = 0.01,
     weight.upper.bound = 30
   )
@@ -125,11 +193,8 @@ for(i in seq_along(clusters)) {
 }
 ```
 
-
-
-
 ```{r}
-# Extract RMSE and condition number from results
+# Extract RMSE and condition number from results for each cluster and the full dataset
 cluster_summary <- data.frame(
   dataset = names(results_list),
   RMSE = sapply(results_list, function(x) x$RMSE),
@@ -143,15 +208,13 @@ cluster_summary <- data.frame(
   # Order with full dataset first, then clusters by RMSE
   arrange(type == "Cluster", RMSE)
 
-print(cluster_summary)
-
-# Save as CSV
+# Save as CSV for assessment
 write.csv(cluster_summary, here("summaries", "cluster_analysis_summary_full.csv"),
           row.names = FALSE)
 ```
 
 ```{r}
-# Scatter plot showing both metrics
+# Scatter plot showing both metrics -  review what these mean and provide thresholds and information
 ggplot(cluster_summary, aes(x = RMSE, y = condition_number, color = dataset)) +
   geom_point(size = 4) +
   geom_text(aes(label = dataset), vjust = -0.5) +
@@ -163,7 +226,7 @@ ggplot(cluster_summary, aes(x = RMSE, y = condition_number, color = dataset)) +
 ```
 
 ```{r}
-# Create comparison plot
+# Create comparison plot - reveiw what is considered acceptable
 ggplot(cluster_summary, aes(x = reorder(dataset, RMSE), y = RMSE, fill = type)) +
   geom_col() +
   coord_flip() +
@@ -174,11 +237,116 @@ ggplot(cluster_summary, aes(x = reorder(dataset, RMSE), y = RMSE, fill = type)) 
   geom_text(aes(label = round(RMSE, 3)), hjust = -0.1, size = 3)
 ```
 
-Ok, here struggling to pull out the results from each cluster and combine them and not making much headway with Claude.
+
+```{r}
+# Apply function and prepare data in one pipeline
+output_dm <- extract_class_abundances(results_list) %>%
+  # Rename phytoplankton groups for plotting
+  rename(cyan = Cyanobacteria, hapt = Haptophytes, 
+         GA = Prasinophytes, cryp = Cryptophytes,
+         dino = `Dinoflagellates-1`, dict = Dictyophytes, diat = D1) %>%
+  # Convert to long format for ggplot
+  pivot_longer(cols = c(GA, cryp, diat, dino, hapt, dict, cyan),
+               names_to = "group",
+               values_to = "chla") %>%
+  # Join metadata
+  left_join(metadata, by = "sample_id") %>%
+  # Create analysis_type column
+  mutate(analysis_type = if_else(cluster == "full_dataset", "full_dataset", "clustered"),
+         date = ymd(date)) %>%
+  # Calculate daily means while preserving cluster and analysis_type
+  group_by(date, site_id, depth, group, cluster, analysis_type) %>%
+  summarise(chla = round(mean(chla, na.rm = TRUE), 2), .groups = "drop") %>%
+  mutate(year = year(date)) %>% 
+  # Reorder columns for better viewing
+  select(date, year, site_id, depth, cluster, analysis_type, group, chla)
+
+# Check for duplicates
+duplicate_check <- output_dm %>%
+  group_by(date, site_id, depth, group, cluster, analysis_type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  filter(n > 1)
+
+# Display results
+if(nrow(duplicate_check) == 0) {
+  cat("No duplicates found - data is ready for plotting!\n")
+} else {
+  cat("Warning: Duplicates still exist:\n")
+  print(duplicate_check)
+}
+
+# Quick summary of the data
+cat("\nData summary:\n")
+cat("Date range:", as.character(min(output_dm$date)), "to", as.character(max(output_dm$date)), "\n")
+cat("Number of sites:", length(unique(output_dm$site_id)), "\n")
+cat("Phytoplankton groups:", paste(unique(output_dm$group), collapse = ", "), "\n")
+cat("Analysis types:", paste(unique(output_dm$analysis_type), collapse = ", "), "\n")
+cat("Clusters:", paste(unique(output_dm$cluster), collapse = ", "), "\n")
+```
 
 
 
 
+```{r}
+#Setting groups and colors for plotting.
+
+#Setting color palette for chemtax - needs to be modified when additional groups are added.
+
+npg_distinct_colors <- c(
+  "#E64B35",  # diatoms
+  "#4DBBD5",  # dictyochophytes
+  # "#00A087",  # raphidophytes - turn on if using.
+  "#3C5488",  # Dinoflagellates
+  "#F39B7F",  # Cryptophyes
+  "#8491B4",  # Green Algae
+  "#91D1C2",  # Haptophytes
+  "#FFC107",  # Cyanobacteria
+  "#7E6148",  # Brown
+  "#B09C85"   # Light brown
+)
+
+scale_fill_npg_distinct <- function(...) {
+  ggplot2::scale_fill_manual(values = npg_distinct_colors, ...)
+}
+
+#Setting plotting order phytoplankton groups
+#Order phytoplankton groups roughly from smallest to largest - create order list
+order_chem <- c("cyan", "hapt", "GA", "cryp",
+                   "dino", "raph", "dict", "diat")
+
+#Chemtax full data - Specify order of phyto groups for figures
+output_dm <- arrange(mutate(output_dm,
+                                group = factor(group,
+                                levels = order_chem)))
+
+```
+
+```{r}
+output_dm %>%
+  filter(year == 2016) %>% 
+  ggplot() +
+  geom_area(aes(date, chla, fill = fct_rev(group)),
+           stat = "identity", 
+           alpha = 1, color = "black", size = 1) +
+  scale_fill_npg_distinct() +
+  facet_grid(analysis_type ~.) +
+  # scale_x_date(limits = as.Date(c("2024-01-01", "2024-12-31")),
+  #              expand = c(0, 0),
+  #              date_breaks = "months", date_labels = "%b") +
+  theme_bw() +
+  labs(y = bquote("Phyto. (mg" ~ m^-3*")"),
+       fill = "Group") +
+  theme(
+        legend.position = "right",
+        # legend.position = c(1.02, 0.5),
+        legend.key.height = unit(0.5, "cm"),
+        # legend.text = element_text(size = 25),
+        legend.title = element_blank(),
+        text = element_text(size = 38), #35
+        axis.text = element_text(color = "black"),
+        axis.title.x = element_blank())
+        # axis.text.y = element_blank())
+```
 
 
 
