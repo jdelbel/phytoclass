@@ -1,32 +1,6 @@
----
-title: "R Notebook"
-output: html_notebook
----
 
-```{r}
-#Loading packages
-library(phytoclass)
-library(readxl)
-library(dplyr)
-library(tidyr)
-library(lubridate)
-library(ggplot2)
-library(forcats)
-library(here)
-library(purrr)
-library(hakaiApi)
 
-# Source functions
-source(here("functions", "functions.R"))
-```
-
----
-Functions
----
-
-```{r}
 # Extract class abundances from phytoclass analysis from all clusters into a single dataframe
-
 # Method 1: Using purrr and dplyr (recommended)
 extract_class_abundances <- function(results_list) {
   # Extract class abundances with cluster names
@@ -49,13 +23,11 @@ extract_class_abundances <- function(results_list) {
   
   return(class_abundances_combined)
 }
-```
 
-```{r}
 # Example of how to create the Excel templates:
 create_excel_templates <- function() {
   
-# Your specific classes and pigments
+  # Your specific classes and pigments
   classes <- c("Prasinophytes", "Cryptophytes", "D1", "Dinoflagellates-1", 
                "Haptophytes", "Dictyophytes", "Cyanobacteria")
   
@@ -72,7 +44,7 @@ create_excel_templates <- function() {
   
   # Save templates
   write.csv(template_df, here("min_max", "min_ratios_template.csv"),
-                              row.names = FALSE)
+            row.names = FALSE)
   write.csv(template_df, here("min_max", "max_ratios_template.csv"),
             row.names = FALSE)
   
@@ -81,14 +53,7 @@ create_excel_templates <- function() {
   cat("- max_ratios_template.csv\n")
   cat("\nEdit these in Excel, then use convert_excel_to_phytoclass() to convert to phytoclass format.\n")
 }
-```
 
-
-```{r}
-# Uncomment to create templates:
-# create_excel_templates()
-```
-```{r}
 # Function to convert Excel min/max matrices to phytoclass long format
 # This assumes you have two CSV files: one for min ratios, one for max ratios
 # Both should have the same structure as your CHEMTAX matrix
@@ -148,7 +113,7 @@ convert_excel_to_phytoclass <- function(min_file, max_file) {
   # This test ensures the algorithm can generate valid random ratios
   # Exclude Tchla entries where both min and max = 1 (reference pigment)
   incompatible_entries <- (Min_max$min * 1.2) > (Min_max$max * 0.8) & 
-                          !(Min_max$Pig_Abbrev == "Tchla" & Min_max$min == 1 & Min_max$max == 1)
+    !(Min_max$Pig_Abbrev == "Tchla" & Min_max$min == 1 & Min_max$max == 1)
   if (any(incompatible_entries)) {
     cat("Warning: Found entries where min * 1.2 > max * 0.8 (incompatible with phytoclass algorithm):\n")
     print(Min_max[incompatible_entries, ])
@@ -220,7 +185,7 @@ convert_matrices_to_phytoclass <- function(min_matrix, max_matrix) {
   # Check for phytoclass algorithm compatibility (min * 1.2 > max * 0.8)
   # Exclude Tchla entries where both min and max = 1 (reference pigment)
   incompatible_entries <- (Min_max$min * 1.2) > (Min_max$max * 0.8) & 
-                          !(Min_max$Pig_Abbrev == "Tchla" & Min_max$min == 1 & Min_max$max == 1)
+    !(Min_max$Pig_Abbrev == "Tchla" & Min_max$min == 1 & Min_max$max == 1)
   if (any(incompatible_entries)) {
     cat("Warning: Found entries where min * 1.2 > max * 0.8 (incompatible with phytoclass algorithm):\n")
     print(Min_max[incompatible_entries, ])
@@ -311,8 +276,8 @@ generate_pigment_matrix_from_csv <- function(min_file, max_file) {
 
 # Complete workflow function
 create_complete_phytoclass_setup <- function(min_file, max_file, 
-                                           save_pigment_matrix = TRUE,
-                                           pigment_matrix_file = "pigment_matrix.csv") {
+                                             save_pigment_matrix = TRUE,
+                                             pigment_matrix_file = "pigment_matrix.csv") {
   
   # Generate the long format min_max for phytoclass
   Min_max <- convert_excel_to_phytoclass(min_file, max_file)
@@ -328,8 +293,8 @@ create_complete_phytoclass_setup <- function(min_file, max_file,
   if (save_pigment_matrix) {
     # Save pigment matrix with Class column for easy import
     pigment_matrix_df <- data.frame(Class = rownames(pigment_matrix), 
-                                   pigment_matrix, 
-                                   check.names = FALSE)
+                                    pigment_matrix, 
+                                    check.names = FALSE)
     write.csv(pigment_matrix_df, pigment_matrix_file, row.names = FALSE)
     cat("Saved pigment matrix to:", pigment_matrix_file, "\n")
   }
@@ -340,293 +305,4 @@ create_complete_phytoclass_setup <- function(min_file, max_file,
   
   return(list(Min_max = Min_max, pigment_matrix = pigment_matrix))
 }
-
-```
-
----
-Download data and wrangling
----
-```{r}
-# Initialize the client
-client <- Client$new()
-```
-```{r}
-#Setting up Query
-endpoint <- "/eims/views/output/hplc"
-filter <- "site_id=QU39&"
-chl_url <- paste0("https://hecate.hakai.org/api", endpoint,"?limit=-1&", filter)
-data <- client$get(chl_url)
-```
-
-```{r}
-#Wrangling the data to prepare it for analysis
-
-#Select the data and pigments that will be analyzed with phytoclass
-# rename columns for analysis and drop any rows with NAs
-h <- data %>%
-  filter(line_out_depth == 5 & site_id == "QU39" & analyzing_lab == "USC") %>% 
-  select(date,
-         site_id,
-         depth = line_out_depth,
-         C12 = chl_c1_c2,
-         Per = peri,
-         X19but = `_19_but`,
-         Fuco = fuco,
-         X19hex = `_19_hex`,
-         Pra = prasinoxanthin,
-         Allo = alloxanthin,
-         Zea = zeaxanthin,
-         Chl_b = chl_b,
-         Tchla = all_chl_a) %>% 
-  drop_na() %>% 
-  # Calculate daily averages across all pigments - need here as can cause errors with clustering
-  group_by(date, site_id, depth) %>%
-  summarise(across(C12:Tchla, ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
-  # Add row numbers and create ID after averaging
-  group_by(date) %>% 
-  mutate(n = row_number()) %>% 
-  ungroup() %>% 
-  unite(id, c(date, site_id, depth, n), sep = "-", remove = FALSE) #Create unique id for later joining
-
-h <- as.data.frame(h)
-
-#Setting ID for rownames to associate metadata at later point.
-rownames(h) <- h$id
-
-#Creating data matrix for analysis
-data_matrix <- h %>% 
-  select(C12:Tchla)
-
-#Creating metadata column to join back with data later.
-metadata <- h %>% 
-  select(id:depth) %>% 
-  rename(sample_id = id)
-```
-
-```{r}
-#running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepencies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
-results <- create_complete_phytoclass_setup("min_ratios_manu_v1.csv",
-                                       "max_ratios_manu_v1.csv")
-
-min_max_matrix <- results$Min_max           # For phytoclass analysis
-pigment_matrix <- results$pigment_matrix    # Binary matrix (1/0)
-```
-
-```{r}
-#Performs recommended pre-analysis clustering to group data with similar pigment ratios
-
-# Get clusters and remove Clust column
-clusters <- lapply(Cluster(data_matrix, min_cluster_size = 14)$cluster.list, 
-                   function(x) { x$Clust <- NULL; x })
-
-# Add the full dataset as the first element so unclustered results can be compared to clustered.
-full_data <- data_matrix
-full_data$Clust <- NULL  # Remove cluster column if it exists
-clusters <- c(list(full_data), clusters)
-
-# Create names for each cluster in list including full dataset
-names(clusters) <- c("full_dataset", paste0("clust", seq_along(clusters[-1])))
-list2env(clusters, envir = .GlobalEnv)
-
-# Now you have full_dataset, clust1, clust2, clust3, etc. as separate dataframes
-```
-
-```{r}
-# Set seed once for reproducibility
-set.seed(7683)
-
-# Run phytoclass analysis on full dataset and all clusters independently
-results_list <- list()
-for(i in seq_along(clusters)) {
-  dataset_name <- names(clusters)[i]
-  cat("Processing", dataset_name, "(", i, "of", length(clusters), ")\n")
-  
-  results_list[[i]] <- simulated_annealing(
-    S = clusters[[i]], 
-    F = pigment_matrix,
-    user_defined_min_max = min_max_matrix,
-    do_matrix_checks = TRUE,
-    niter = 1, #Kept at one for initial analysis - recommended to be 500.
-    step = 0.01,
-    weight.upper.bound = 30,
-    verbose = F
-  )
-  
-  names(results_list)[i] <- dataset_name
-}
-```
-
-```{r}
-# Extract RMSE and condition number from results for each cluster and the full dataset
-cluster_summary <- data.frame(
-  dataset = names(results_list),
-  RMSE = sapply(results_list, function(x) x$RMSE),
-  condition_number = sapply(results_list, function(x) x$`condition number`)
-) %>%
-  # Add a column to distinguish full dataset from clusters
-  mutate(
-    type = ifelse(dataset == "full_dataset", "Full Dataset", "Cluster"),
-    sample_size = sapply(clusters, nrow)
-  ) %>%
-  # Order with full dataset first, then clusters by RMSE
-  arrange(type == "Cluster", RMSE)
-
-# Save as CSV for assessment
-write.csv(cluster_summary, here("summaries", "cluster_analysis_summary_full.csv"),
-          row.names = FALSE)
-```
-
-```{r}
-# Scatter plot showing both metrics -  review what these mean and provide thresholds and information
-ggplot(cluster_summary, aes(x = RMSE, y = condition_number, color = dataset)) +
-  geom_point(size = 4) +
-  geom_text(aes(label = dataset), vjust = -0.5) +
-  theme_minimal() +
-  labs(title = "RMSE vs Condition Number by Cluster",
-       x = "RMSE", 
-       y = "Condition Number") +
-  theme(legend.position = "none")
-
-#Add lines for acceptable
-```
-
-```{r}
-# Create comparison plot - reveiw what is considered acceptable
-ggplot(cluster_summary, aes(x = reorder(dataset, RMSE), y = RMSE, fill = type)) +
-  geom_col() +
-  coord_flip() +
-  scale_fill_manual(values = c("Full Dataset" = "darkblue", "Cluster" = "lightblue")) +
-  theme_minimal() +
-  labs(title = "RMSE Comparison: Full Dataset vs Clusters",
-       x = "Dataset", y = "RMSE", fill = "Type") +
-  geom_text(aes(label = round(RMSE, 3)), hjust = -0.1, size = 3)
-
-#Add lines for acceptable
-```
-
-
-```{r}
-# Apply function and prepare data in one pipeline
-output_dm <- extract_class_abundances(results_list) %>%
-  # Rename phytoplankton groups for plotting
-  rename(cyan = Cyanobacteria, hapt = Haptophytes, 
-         GA = Prasinophytes, cryp = Cryptophytes,
-         dino = `Dinoflagellates-1`, dict = Dictyophytes, diat = D1) %>%
-  # Convert to long format for ggplot
-  pivot_longer(cols = c(GA, cryp, diat, dino, hapt, dict, cyan),
-               names_to = "group",
-               values_to = "chla") %>%
-  # Join metadata
-  left_join(metadata, by = "sample_id") %>%
-  # Create analysis_type column
-  mutate(analysis_type = if_else(cluster == "full_dataset", "full_dataset", "clustered"),
-         date = ymd(date)) %>%
-  # Calculate daily means while preserving cluster and analysis_type
-  group_by(date, site_id, depth, group, cluster, analysis_type) %>%
-  summarise(chla = round(mean(chla, na.rm = TRUE), 2), .groups = "drop") %>%
-  mutate(year = year(date)) %>% 
-  # Reorder columns for better viewing
-  select(date, year, site_id, depth, cluster, analysis_type, group, chla)
-
-# Check for duplicates
-duplicate_check <- output_dm %>%
-  group_by(date, site_id, depth, group, cluster, analysis_type) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  filter(n > 1)
-
-# Display results
-if(nrow(duplicate_check) == 0) {
-  cat("No duplicates found - data is ready for plotting!\n")
-} else {
-  cat("Warning: Duplicates still exist:\n")
-  print(duplicate_check)
-}
-
-# Quick summary of the data
-cat("\nData summary:\n")
-cat("Date range:", as.character(min(output_dm$date)), "to", as.character(max(output_dm$date)), "\n")
-cat("Number of sites:", length(unique(output_dm$site_id)), "\n")
-cat("Phytoplankton groups:", paste(unique(output_dm$group), collapse = ", "), "\n")
-cat("Analysis types:", paste(unique(output_dm$analysis_type), collapse = ", "), "\n")
-cat("Clusters:", paste(unique(output_dm$cluster), collapse = ", "), "\n")
-```
-
-```{r}
-#Setting groups and colors for plotting.
-
-#Setting color palette for chemtax - needs to be modified when additional groups are added.
-
-npg_distinct_colors <- c(
-  "#E64B35",  # diatoms
-  "#4DBBD5",  # dictyochophytes
-  # "#00A087",  # raphidophytes - turn on if using.
-  "#3C5488",  # Dinoflagellates
-  "#F39B7F",  # Cryptophyes
-  "#8491B4",  # Green Algae
-  "#91D1C2",  # Haptophytes
-  "#FFC107",  # Cyanobacteria
-  "#7E6148",  # Brown
-  "#B09C85"   # Light brown
-)
-
-scale_fill_npg_distinct <- function(...) {
-  ggplot2::scale_fill_manual(values = npg_distinct_colors, ...)
-}
-
-#Setting plotting order phytoplankton groups
-#Order phytoplankton groups roughly from smallest to largest - create order list
-order_chem <- c("cyan", "hapt", "GA", "cryp",
-                   "dino", "raph", "dict", "diat")
-
-#Chemtax full data - Specify order of phyto groups for figures
-output_dm <- arrange(mutate(output_dm,
-                                group = factor(group,
-                                levels = order_chem)))
-
-```
-
-```{r}
-output_dm %>%
-  filter(year == 2016) %>% 
-  ggplot() +
-  geom_area(aes(date, chla, fill = fct_rev(group)),
-           stat = "identity", 
-           alpha = 1, color = "black", size = 1) +
-  scale_fill_npg_distinct() +
-  facet_grid(analysis_type ~.) +
-  # scale_x_date(limits = as.Date(c("2024-01-01", "2024-12-31")),
-  #              expand = c(0, 0),
-  #              date_breaks = "months", date_labels = "%b") +
-  theme_bw() +
-  labs(y = bquote("Phyto. (mg" ~ m^-3*")"),
-       fill = "Group") +
-  theme(
-        legend.position = "right",
-        # legend.position = c(1.02, 0.5),
-        legend.key.height = unit(0.5, "cm"),
-        # legend.text = element_text(size = 25),
-        legend.title = element_blank(),
-        text = element_text(size = 38), #35
-        axis.text = element_text(color = "black"),
-        axis.title.x = element_blank())
-        # axis.text.y = element_blank())
-```
-
-#Now I need to set this up for comparison with CHEMTAX
-#See if I can CHEMTAX running in R and compare to my excel analysis
-#Try steepest decsent in phytoclass and CHEMTAX R package.
-#Can I make my own R package based on Excel code?
-
-```{r}
-#I think I should export and then upload elsewhere because if I do a full run then I won't want to run through that each time.
-
-#Version control export name. 
-#date+v
-#matrix_name
-
-write.csv(output_dm, here("outputs", "qu39_manu_2025-07-08.csv"))
-```
-
-
-
 
