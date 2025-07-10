@@ -106,6 +106,12 @@ list2env(clusters, envir = .GlobalEnv)
 
 # Now you have full_dataset, clust1, clust2, clust3, etc. as separate dataframes
 ```
+```{r}
+#If turned on, this will remove the full dataset from the list - likely not necessary to analyze the full dataset each time, just useful to assess the effect of running the analysis on the individual clusters.
+clusters[[1]] <- NULL
+```
+
+
 
 ```{r}
 # Set seed once for reproducibility
@@ -122,7 +128,7 @@ for(i in seq_along(clusters)) {
     F = pigment_matrix,
     user_defined_min_max = min_max_matrix,
     do_matrix_checks = TRUE,
-    niter = 500, #Kept at one for initial analysis - recommended to be 500.
+    niter = 1, #Kept at one for initial analysis - recommended to be 500.
     step = 0.01,
     weight.upper.bound = 30,
     verbose = F
@@ -148,8 +154,8 @@ cluster_summary <- data.frame(
   arrange(type == "Cluster", RMSE)
 
 # Save as CSV for assessment
-write.csv(cluster_summary, here("summaries", "cluster_analysis_summary_full.csv"),
-          row.names = FALSE)
+# write.csv(cluster_summary, here("summaries", "cluster_analysis_summary_full.csv"),
+#           row.names = FALSE)
 ```
 
 ```{r}
@@ -268,7 +274,7 @@ output_dm <- arrange(mutate(output_dm,
 
 ```{r}
 output_dm %>%
-  filter(year == 2024) %>% 
+  filter(year == 2016) %>% 
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
            stat = "identity", 
@@ -304,9 +310,46 @@ output_dm %>%
 #date+v
 #matrix_name
 
-write.csv(output_dm, here("outputs", "qu39_manu_2025-07-08_niter-500.csv"))
+# write.csv(output_dm, here("outputs", "qu39_manu_2025-07-08_niter-500.csv"))
 ```
 
-Running 500 iterations took about 35 minutes, but I ran on the full dataset and clusters - could be reduced by not doing full dataset. Can already see issues with cyanobacteria.
+Running 500 iterations took about 35 minutes, but I ran on the full dataset and clusters - could be reduced by not doing full dataset. 
 
+I think an official comparison with CHEMTAX should be done using a similar clustering approach - would take a while if I can't get it going in R, but needed.
+
+Start with just straight up comparison
+
+
+I need to research why the clustering approach they use is necessary - I used a different one (Swan et al.). 
+
+```{r}
+#Trying to run the steepest descent algorithm to also compare with the CHEMTAX results.
+#This is a similar method to chemtax, but there is no ratio limits, so ratios are unbounded.
+#In the manuscript they develop an R CHEMTAX, but not provided unfortunately. 
+MC <- Matrix_checks(data_matrix, pigment_matrix)
+Snew <- MC$Snew
+Fnew <- MC$Fnew
+SDRes <- Steepest_Desc(Snew, Fnew, num.loops = 1)
+
+#Something didn't work - giving zeros for most class abundances.
+```
+
+```{r}
+#Uploading example data
+Sm <- phytoclass::Sm
+Fm <- phytoclass::Fm
+```
+
+```{r}
+#Running on example data 
+MC <- Matrix_checks(Sm, Fm)
+Snew <- MC$Snew
+Fnew <- MC$Fnew
+SDRes <- Steepest_Desc(Snew, Fnew, num.loops = 10)
+
+#Not working - same error as on my data
+# plot(SDRes$Figure)
+
+#Method not working even with example data - potentially issue and not maintained/fixed as not main function of package? 
+```
 

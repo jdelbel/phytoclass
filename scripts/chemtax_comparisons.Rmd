@@ -1,0 +1,386 @@
+
+Script to take phyto-class outputs and compare them to those done via CHEMTAX
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(here)
+library(readxl)
+library(ggplot2)
+library(broom)
+library(scales)
+library(purrr)
+library(knitr)
+library(kableExtra)
+library(webshot2)
+```
+
+```{r}
+#Upload phytoclass output
+p <- read.csv(here("outputs", "qu39_manu_2025-07-08_niter-500.csv"))
+
+#Upload CHEMTAX outputs. Here, I am uploading results from my manuscript runs, which only go until the end of 2018. I need to update the full timeseries using new clustering approaches etc.
+c <- read_xlsx(here("files", "chemtax_manu_2020_06_17.xlsx"))
+
+#Should also use Central coast data from last manuscript.
+
+#Currently do not have an R CHEMTAX approach, so will continue with manual methods, but can do clustering within my phytoclass script (or make a new one just for clustering)
+```
+
+```{r}
+#For comparison, I think best to join long format of both, by date/depth/group then I can theoretically facet scatterplots with statistics?
+
+#Prepping the phytoclass data - only using the final clustered data with 500 iterations.
+pc <- p %>% 
+  filter(analysis_type == "clustered") %>% 
+  select(date,
+         site_id,
+         depth,
+         group,
+         chla_pc = chla) %>% 
+  mutate(date = date(date)) %>% 
+  replace(is.na(.), 0)
+
+#prepping CHEMTAX data. Renaming columns to match those of phytoclass and then pivoting to long format.
+cc <- c %>% 
+  select(date = Date,
+         site_id = Station,
+         depth,
+         cyan = Cyanobacteria,
+         hapt = Hapto, 
+         GA = `Prasinophytes-3`,
+         cryp = Cryptophytes,
+         dino = `Dinoflagellates-1`,
+         dict = Dictyo,
+         diat = `Diatoms-1`) %>% 
+  pivot_longer(cols = c(GA, cryp, diat, dino, hapt, dict, cyan),
+               names_to = "group",
+               values_to = "chla_c") 
+
+#Joining the two datatypes and dropping NAs where there is not comparison point
+join <- pc %>% 
+  full_join(cc) %>% 
+  drop_na()
+
+```
+
+```{r}
+# Calculate equal axis limits for each group
+axis_limits <- join %>%
+  group_by(group) %>%
+  summarise(
+    min_val = min(c(chla_c, chla_pc), na.rm = TRUE),
+    max_val = max(c(chla_c, chla_pc), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Add small buffer (5%) to limits
+    buffer = (max_val - min_val) * 0.05,
+    axis_min = min_val - buffer,
+    axis_max = max_val + buffer
+  )
+```
+
+
+```{r}
+# Calculate regression statistics for each group
+regression_stats <- join %>%
+  group_by(group) %>%
+  summarise(
+    # Fit linear model and extract statistics
+    model = list(lm(chla_pc ~ chla_c, data = cur_data())),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Extract model statistics safely
+    r_squared = map_dbl(model, ~ summary(.x)$r.squared),
+    slope = map_dbl(model, ~ coef(.x)[2]),
+    p_value = map_dbl(model, ~ {
+      model_summary <- summary(.x)
+      if (nrow(model_summary$coefficients) >= 2) {
+        model_summary$coefficients[2, 4]  # p-value for slope
+      } else {
+        NA
+      }
+    }),
+    # Create formatted statistics labels
+    r2_label = paste0("R² = ", sprintf("%.3f", r_squared)),
+    slope_label = paste0("Slope = ", sprintf("%.3f", slope)),
+    p_label = case_when(
+      is.na(p_value) ~ "p = NA",
+      p_value < 0.001 ~ "p < 0.001",
+      p_value < 0.01 ~ paste0("p = ", sprintf("%.3f", p_value)),
+      TRUE ~ paste0("p = ", sprintf("%.2f", p_value))
+    ),
+    stats_label = paste(r2_label, slope_label, p_label, sep = "\n")
+  )
+```
+
+
+```{r}
+# Create dummy data for setting equal axis limits
+dummy_data <- axis_limits %>%
+  select(group, axis_min, axis_max) %>%
+  pivot_longer(cols = c(axis_min, axis_max), 
+               names_to = "type", values_to = "value") %>%
+  mutate(chla_c = value, chla_pc = value)
+```
+
+```{r}
+#Setting groups and colors for plotting.
+
+#Setting color palette for chemtax - needs to be modified when additional groups are added.
+
+npg_distinct_colors <- c(
+  "#E64B35",  # diatoms
+  "#4DBBD5",  # dictyochophytes
+  # "#00A087",  # raphidophytes - turn on if using.
+  "#3C5488",  # Dinoflagellates
+  "#F39B7F",  # Cryptophyes
+  "#8491B4",  # Green Algae
+  "#91D1C2",  # Haptophytes
+  "#FFC107",  # Cyanobacteria
+  "#7E6148",  # Brown
+  "#B09C85"   # Light brown
+)
+
+scale_color_npg_distinct <- function(...) {
+  ggplot2::scale_color_manual(values = npg_distinct_colors, ...)
+}
+
+#Setting plotting order phytoplankton groups
+#Order phytoplankton groups roughly from smallest to largest - create order list
+order_chem <- c("cyan", "hapt", "GA", "cryp",
+                   "dino", "raph", "dict", "diat")
+
+#Chemtax full data - Specify order of phyto groups for figures
+join <- arrange(mutate(join,
+                       group = factor(group,
+                                      levels = order_chem)))
+```
+
+```{r}
+# Create the plot
+p <- join %>%
+  ggplot(aes(x = chla_c, y = chla_pc)) +
+  # Add invisible dummy points to set equal axis limits
+  geom_blank(data = dummy_data) +
+  geom_point(aes(color = group), alpha = 0.9, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", 
+              linewidth = 0.8, alpha = 0.2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", 
+              color = "red", alpha = 0.6, linewidth = 0.7) +
+  
+  scale_x_continuous(labels = label_number(accuracy = 0.1)) +
+  scale_y_continuous(labels = label_number(accuracy = 0.1)) +
+  
+  facet_wrap(~group, scales = "free", ncol = 3) +
+  
+  # Add regression statistics
+  geom_text(data = regression_stats, 
+            aes(label = stats_label), 
+            x = Inf, y = -Inf, 
+            hjust = 1.1, vjust = -0.5, 
+            size = 4, color = "black",
+            fontface = "bold") +
+  
+  # Styling
+  scale_color_npg_distinct(name = "Phytoplankton\nGroup") +
+  labs(
+    x = expression(paste("CHEMTAX Chl ", italic("a"), " (mg m"^"-3", ")")),
+    y = expression(paste("PhytoClass Chl ", italic("a"), " (mg m"^"-3", ")")),
+    title = "Comparison of Phytoplankton Chlorophyll a Estimates",
+    subtitle = "CHEMTAX vs PhytoClass Analysis by Taxonomic Group",
+    caption = "Dashed red line = 1:1 relationship; Black line = linear regression with 95% CI"
+  ) +
+  theme_bw() +
+  theme(
+    # Panel and grid styling
+    panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+    panel.grid.minor = element_line(color = "grey95", linewidth = 0.25),
+    panel.border = element_rect(color = "black", linewidth = 0.8),
+    
+    # Text styling
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey20"),
+    plot.caption = element_text(size = 9, color = "grey40", hjust = 0),
+    
+    # Facet styling
+    strip.text = element_text(size = 11, face = "bold"),
+    strip.background = element_rect(fill = "grey95", color = "black"),
+    
+    # Legend styling
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "none", # Remove legend since color is redundant with facets
+    
+    # Overall plot margins
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+  )
+
+# Print the plot
+print(p)
+
+
+ggsave(here("figures", "phytoplankton_comparison.png"), plot = p,
+       width = 12, height = 8, dpi = 300, bg = "white")
+```
+```{r}
+# This now looks good. What are a few other widely used comparison metrics that should be reported and can they be put in a summary table or figure
+```
+
+```{r}
+
+
+
+# Calculate comprehensive comparison metrics
+comparison_metrics <- join %>%
+  group_by(group) %>%
+  summarise(
+    n = n(),
+    
+    # Basic regression metrics
+    r_squared = cor(chla_c, chla_pc, use = "complete.obs")^2,
+    slope = coef(lm(chla_pc ~ chla_c))[2],
+    intercept = coef(lm(chla_pc ~ chla_c))[1],
+    
+    # Bias and error metrics
+    mean_bias = mean(chla_pc - chla_c, na.rm = TRUE),
+    mean_absolute_error = mean(abs(chla_pc - chla_c), na.rm = TRUE),
+    root_mean_square_error = sqrt(mean((chla_pc - chla_c)^2, na.rm = TRUE)),
+    
+    # Relative metrics (%)
+    mean_relative_bias = mean((chla_pc - chla_c) / chla_c * 100, na.rm = TRUE),
+    mean_absolute_relative_error = mean(abs((chla_pc - chla_c) / chla_c) * 100, na.rm = TRUE),
+    
+    # Agreement metrics
+    concordance_correlation = {
+      # Lin's concordance correlation coefficient
+      pearson_r = cor(chla_c, chla_pc, use = "complete.obs")
+      mean_x = mean(chla_c, na.rm = TRUE)
+      mean_y = mean(chla_pc, na.rm = TRUE)
+      var_x = var(chla_c, na.rm = TRUE)
+      var_y = var(chla_pc, na.rm = TRUE)
+      2 * pearson_r * sqrt(var_x) * sqrt(var_y) / (var_x + var_y + (mean_x - mean_y)^2)
+    },
+    
+    # Model efficiency (Nash-Sutcliffe)
+    model_efficiency = 1 - sum((chla_pc - chla_c)^2, na.rm = TRUE) / 
+                      sum((chla_c - mean(chla_c, na.rm = TRUE))^2, na.rm = TRUE),
+    
+    # Percent within factor of 2
+    within_factor_2 = sum(chla_pc/chla_c >= 0.5 & chla_pc/chla_c <= 2.0, na.rm = TRUE) / 
+                     sum(!is.na(chla_c) & !is.na(chla_pc)) * 100,
+    
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Format metrics for presentation
+    across(c(r_squared, slope, intercept, concordance_correlation, model_efficiency), 
+           ~ round(.x, 3)),
+    across(c(mean_bias, mean_absolute_error, root_mean_square_error), 
+           ~ round(.x, 3)),
+    across(c(mean_relative_bias, mean_absolute_relative_error, within_factor_2), 
+           ~ round(.x, 1))
+  )
+
+# Create a professional summary table
+metrics_table <- comparison_metrics %>%
+  select(
+    Group = group,
+    N = n,
+    `R²` = r_squared,
+    Slope = slope,
+    `Intercept` = intercept,
+    `Mean Bias` = mean_bias,
+    `MAE` = mean_absolute_error,
+    `RMSE` = root_mean_square_error,
+    `MRB (%)` = mean_relative_bias,
+    `MARE (%)` = mean_absolute_relative_error,
+    `CCC` = concordance_correlation,
+    `ME` = model_efficiency,
+    `Within 2x (%)` = within_factor_2
+  )
+
+# Print formatted table
+kable(metrics_table, 
+      caption = "Comparison Metrics: PhytoClass vs CHEMTAX Chlorophyll a Estimates",
+      booktabs = TRUE,
+      linesep = "") %>%
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down"),
+                bootstrap_options = c("striped", "hover", "condensed")) %>%
+  add_header_above(c(" " = 5, "Absolute Errors" = 3, "Relative Errors" = 2, "Agreement" = 3)) %>%
+  footnote(general = c("MAE = Mean Absolute Error; RMSE = Root Mean Square Error",
+                      "MRB = Mean Relative Bias; MARE = Mean Absolute Relative Error", 
+                      "CCC = Concordance Correlation Coefficient; ME = Model Efficiency",
+                      "Within 2x = Percentage of values within factor of 2"),
+           general_title = "Abbreviations: ",
+           footnote_as_chunk = TRUE)
+
+# Alternative: Create a visual summary of key metrics
+
+# Select key metrics for visualization
+key_metrics <- comparison_metrics %>%
+  select(group, r_squared, concordance_correlation, mean_absolute_relative_error, within_factor_2) %>%
+  pivot_longer(cols = -group, names_to = "metric", values_to = "value") %>%
+  mutate(
+    metric_label = case_when(
+      metric == "r_squared" ~ "R²",
+      metric == "concordance_correlation" ~ "Concordance\nCorrelation",
+      metric == "mean_absolute_relative_error" ~ "Mean Absolute\nRelative Error (%)",
+      metric == "within_factor_2" ~ "Within Factor\nof 2 (%)"
+    ),
+    metric_type = case_when(
+      metric %in% c("r_squared", "concordance_correlation") ~ "Agreement",
+      metric == "mean_absolute_relative_error" ~ "Error",
+      metric == "within_factor_2" ~ "Accuracy"
+    )
+  )
+
+# Create metrics visualization
+metrics_plot <- ggplot(key_metrics, aes(x = group, y = value, fill = metric_type)) +
+  geom_col(alpha = 0.8) +
+  facet_wrap(~metric_label, scales = "free_y", ncol = 2) +
+  scale_fill_viridis_d(name = "Metric Type") +
+  labs(
+    title = "Key Comparison Metrics by Phytoplankton Group",
+    subtitle = "PhytoClass vs CHEMTAX Performance Summary",
+    x = "Phytoplankton Group",
+    y = "Metric Value",
+    caption = "Higher values indicate better agreement (except for Mean Absolute Relative Error)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(size = 10, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+print(metrics_plot)
+```
+```{r}
+# Create the table (same as before)
+formatted_table <- kable(metrics_table, 
+                        caption = "Comparison Metrics: PhytoClass vs CHEMTAX Chlorophyll a Estimates",
+                        format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  add_header_above(c(" " = 5, "Absolute Errors" = 3, "Relative Errors" = 2, "Agreement" = 3))
+
+# Save as HTML
+save_kable(formatted_table, "comparison_table.html")
+
+# Save as PNG (high quality)
+save_kable(formatted_table, here("figures", "comparison_table.png"), zoom = 2)
+
+print("Table exported as:")
+print("- comparison_table.html")
+print("- comparison_table.png")
+```
+
+
