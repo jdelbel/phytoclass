@@ -14,6 +14,7 @@ library(purrr)
 library(knitr)
 library(kableExtra)
 library(webshot2)
+library(forcats)
 ```
 
 ```{r}
@@ -23,6 +24,9 @@ p <- read.csv(here("outputs", "qu39_manu_2025-07-08_niter-500.csv"))
 #Upload CHEMTAX outputs. Here, I am uploading results from my manuscript runs, which only go until the end of 2018. I need to update the full timeseries using new clustering approaches etc.
 c <- read_xlsx(here("files", "chemtax_manu_2020_06_17.xlsx"))
 
+#Importing wrangled microscopy data
+m <- read.csv(here("files", "micro_research_qu39_2024-06-18.csv"))
+  
 #Should also use Central coast data from last manuscript.
 
 #Currently do not have an R CHEMTAX approach, so will continue with manual methods, but can do clustering within my phytoclass script (or make a new one just for clustering)
@@ -61,9 +65,57 @@ cc <- c %>%
 #Joining the two datatypes and dropping NAs where there is not comparison point
 join <- pc %>% 
   full_join(cc) %>% 
-  drop_na()
+  drop_na() %>% 
+  mutate(diff = chla_c - chla_pc,
+         chla_c = round(chla_c, 2),
+         diff = round(diff, 2))
 
 ```
+```{r}
+#Wrangling the microscopy data - summing to class level with same class names so abundances can be compared to the Phytoclass and CHEMTAX outputs.
+
+m_class <- m %>% 
+  group_by(date, site_id, hakai_id, group, depth) %>% 
+  summarise(group_count = sum(count), .groups = "drop")
+
+#Looking at the different groups available in the microscopy data.
+m_groups <- m_class %>% 
+  distinct(group)
+
+c_group <- join %>% 
+  distinct(group)
+
+m_join <- m_class %>% 
+  mutate(group = case_when(group == "Bacillariophyta" ~ "diat",
+                           group == "Cryptophyta" ~ "cryp",
+                           group == "Chlorophyta-Prasinophyta" ~ "GA",
+                           group == "Dinoflagellata" ~ "dino",
+                           group == "Prymnesiophyta-Haptophyta" ~ "hapt",
+                           group == "Dictyochophyta" ~ "dict",
+                           group == "Cyanobacteria" ~ "cyan")) %>%
+  filter(group %in% c_group$group) %>% 
+  mutate(date = date(date)) %>% 
+  rename(depth_m = depth)
+           
+
+
+m_join_pc <- pc %>%
+  left_join(m_join) %>% 
+  select(-hakai_id) %>% 
+  drop_na()
+  
+  
+#Unfortunately all of the 2015-2018 data are from 0m whereas the chemtax is from 5.
+#Another reason to update the chemtax data.
+#For now let's just build in the functionality for the comparison using the 0m data.
+
+#Also, the phytclass outputs are for nearly the entire time-series - so the 5m comparisons could be done here!
+```
+
+
+
+
+
 
 ```{r}
 # Calculate equal axis limits for each group
@@ -134,19 +186,25 @@ dummy_data <- axis_limits %>%
 
 npg_distinct_colors <- c(
   "#E64B35",  # diatoms
-  "#4DBBD5",  # dictyochophytes
+  "#9632B8",   # dictyochophytes-new color
+  # "#4DBBD5",  # dictyochophytes
   # "#00A087",  # raphidophytes - turn on if using.
   "#3C5488",  # Dinoflagellates
   "#F39B7F",  # Cryptophyes
-  "#8491B4",  # Green Algae
+  # "#8491B4",  # Green Algae
+  "#2E8B57",  #Green Algae 2
   "#91D1C2",  # Haptophytes
-  "#FFC107",  # Cyanobacteria
-  "#7E6148",  # Brown
-  "#B09C85"   # Light brown
+  "#FFC107"  # Cyanobacteria
+  # "#7E6148",  # Brown
+  # "#B09C85"   # Light brown
 )
 
 scale_color_npg_distinct <- function(...) {
   ggplot2::scale_color_manual(values = npg_distinct_colors, ...)
+}
+
+scale_fill_npg_distinct <- function(...) {
+  ggplot2::scale_fill_manual(values = npg_distinct_colors, ...)
 }
 
 #Setting plotting order phytoplankton groups
@@ -168,7 +226,7 @@ p <- join %>%
   geom_blank(data = dummy_data) +
   geom_point(aes(color = group), alpha = 0.9, size = 2) +
   geom_smooth(method = "lm", se = TRUE, color = "black", 
-              linewidth = 0.8, alpha = 0.2) +
+              linewidth = 0.8, alpha = 0.4) +
   geom_abline(intercept = 0, slope = 1, linetype = "dashed", 
               color = "red", alpha = 0.6, linewidth = 0.7) +
   
@@ -363,6 +421,45 @@ metrics_plot <- ggplot(key_metrics, aes(x = group, y = value, fill = metric_type
 
 print(metrics_plot)
 ```
+
+```{r}
+#Plot the time-series comparison with an option to zoom in on certain years.
+join %>%
+  select(-diff) %>% 
+  pivot_longer(c(chla_c, chla_pc),
+               names_to = "analysis_type",
+               values_to = "chla") %>% 
+  group_by(date, site_id, depth, group, analysis_type) %>% 
+  summarise(chla = mean(chla), .groups = "drop") %>% 
+  mutate(year = year(date)) %>% 
+  filter(year == 2018) %>%
+  ggplot() +
+  geom_area(aes(date, chla, fill = fct_rev(group)),
+           stat = "identity", 
+           alpha = 1, color = "black", size = 1) +
+  scale_fill_npg_distinct() +
+  facet_grid(analysis_type ~.) +
+  # scale_x_date(limits = as.Date(c("2024-01-01", "2024-12-31")),
+  #              expand = c(0, 0),
+  #              date_breaks = "months", date_labels = "%b") +
+  theme_bw() +
+  labs(y = bquote("Phyto. (mg" ~ m^-3*")"),
+       fill = "Group") +
+  theme(
+        legend.position = "right",
+        # legend.position = c(1.02, 0.5),
+        legend.key.height = unit(0.5, "cm"),
+        # legend.text = element_text(size = 25),
+        legend.title = element_blank(),
+        text = element_text(size = 38), #35
+        axis.text = element_text(color = "black"),
+        axis.title.x = element_blank())
+        # axis.text.y = element_blank())
+```
+
+
+
+
 ```{r}
 # Create the table (same as before)
 formatted_table <- kable(metrics_table, 
@@ -382,5 +479,149 @@ print("Table exported as:")
 print("- comparison_table.html")
 print("- comparison_table.png")
 ```
+```{r}
+#Investigate where the biggest differences in the poorly performing groups exist
+hapt <- join %>% 
+  filter(group == "hapt") %>% 
+  arrange(diff)
+```
 
+```{r}
+#Ok now I should run the full CHEMTAX timeseries on the phytoclass clusters (Using the same ratios). 
+
+#The only difference is the ratio limits - in CHEMTAX I had them set to 500% for all groups. How can I standardize this across methods?
+
+#Clause suggestions
+
+# Option 1: Convert PhytoClass bounds to CHEMTAX percent ranges
+# 
+# Calculate the midpoint of each PhytoClass min/max range as your CHEMTAX initial ratio
+# Set CHEMTAX percent limits based on how much the PhytoClass range deviates from this midpoint
+# Formula: percent_change = ((max - min) / (2 * midpoint)) * 100
+# 
+# Option 2: Convert CHEMTAX flexibility to PhytoClass bounds
+# 
+# Use your CHEMTAX initial ratios as the center point
+# Apply the CHEMTAX percent changes to create min/max bounds
+# Formula: min = initial_ratio * (1 - percent_change/100) and max = initial_ratio * (1 + percent_change/100)
+# 
+# Option 3: Use a hybrid approach
+# 
+# Start with PhytoClass clusters but use CHEMTAX's steepest descent optimization
+# Set CHEMTAX initial ratios to the midpoint of PhytoClass ranges
+# Set CHEMTAX percent limits to allow the same absolute range as PhytoClass
+
+# Recommendation: Option 1 is probably most straightforward since you're already committed to PhytoClass clusters. You'd essentially be asking "what percent flexibility would CHEMTAX need to achieve the same pigment ratio space that PhytoClass defines?"
+
+#I think I would probably do option-2 if I can considering CHEMTAX my benchmark? Make phytoclass the same as CHEMTAX, at least initially?
+```
+
+For now let's import the microscopy. All of these need to be updated for a good comparison.
+
+```{r}
+# Calculate regression statistics for each group
+regression_stats_pc_m <- m_join_pc %>%
+  group_by(group) %>%
+  summarise(
+    # Fit linear model and extract statistics
+    model = list(lm(chla_pc ~ group_count, data = cur_data())),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Extract model statistics safely
+    r_squared = map_dbl(model, ~ summary(.x)$r.squared),
+    slope = map_dbl(model, ~ coef(.x)[2]),
+    p_value = map_dbl(model, ~ {
+      model_summary <- summary(.x)
+      if (nrow(model_summary$coefficients) >= 2) {
+        model_summary$coefficients[2, 4]  # p-value for slope
+      } else {
+        NA
+      }
+    }),
+    # Create formatted statistics labels
+    r2_label = paste0("R² = ", sprintf("%.3f", r_squared)),
+    slope_label = paste0("Slope = ", sprintf("%.3f", slope)),
+    p_label = case_when(
+      is.na(p_value) ~ "p = NA",
+      p_value < 0.001 ~ "p < 0.001",
+      p_value < 0.01 ~ paste0("p = ", sprintf("%.3f", p_value)),
+      TRUE ~ paste0("p = ", sprintf("%.2f", p_value))
+    ),
+    stats_label = paste(r2_label, slope_label, p_label, sep = "\n")
+  )
+```
+
+
+
+
+```{r}
+
+m1 <- m_join_pc %>%
+  ggplot(aes(x = group_count/10^4, y = chla_pc)) +
+  # Add invisible dummy points to set equal axis limits
+  # geom_blank(data = dummy_data) +
+  geom_point(aes(color = group), alpha = 0.9, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", 
+              linewidth = 0.8, alpha = 0.4) +
+  # geom_abline(intercept = 0, slope = 1, linetype = "dashed", 
+  #             color = "red", alpha = 0.6, linewidth = 0.7) +
+  
+  scale_x_continuous(labels = label_number(accuracy = 0.1)) +
+  scale_y_continuous(labels = label_number(accuracy = 0.1)) +
+  
+  facet_wrap(~group, scales = "free", ncol = 3) +
+  
+  # Add regression statistics
+  geom_text(data = regression_stats_pc_m,
+            aes(label = stats_label),
+            x = Inf, y = -Inf,
+            hjust = 1.1, vjust = -0.5,
+            size = 4, color = "black",
+            fontface = "bold") +
+  
+  # Styling
+  scale_color_npg_distinct(name = "Phytoplankton\nGroup") +
+  labs(
+    x = expression(paste("Abundance ","(cells x 10"^"4 ", "L"^"-1", ")")),
+    y = expression(paste("PhytoClass Chl ", italic("a"), " (mg m"^"-3", ")")),
+    title = "Comparison of Phytoplankton Community Estimates",
+    subtitle = 
+      "Microscopy vs PhytoClass Analysis by Taxonomic Group - All (0-5m mismatch, < 2019)",
+    caption = "Dashed red line = 1:1 relationship; Black line = linear regression with 95% CI"
+  ) +
+  theme_bw() +
+  theme(
+    # Panel and grid styling
+    panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+    panel.grid.minor = element_line(color = "grey95", linewidth = 0.25),
+    panel.border = element_rect(color = "black", linewidth = 0.8),
+    
+    # Text styling
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey20"),
+    plot.caption = element_text(size = 9, color = "grey40", hjust = 0),
+    
+    # Facet styling
+    strip.text = element_text(size = 11, face = "bold"),
+    strip.background = element_rect(fill = "grey95", color = "black"),
+    
+    # Legend styling
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "none", # Remove legend since color is redundant with facets
+    
+    # Overall plot margins
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+  )
+
+# Print the plot
+print(m1)
+
+ggsave(here("figures", "phytoplankton_comparison_microscopy_phytoclass_2019_all.png"),
+       plot = m1,
+       width = 12, height = 8, dpi = 300, bg = "white")
+```
 
