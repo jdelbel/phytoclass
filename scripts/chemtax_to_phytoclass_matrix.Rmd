@@ -1,0 +1,22 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+#Loading packages
+library(readr)
+library(here)
+library(dplyr)
+
+# Source functions
+source(here("functions", "chemtax_to_phytoclass.R"))
+```
+
+```{r}
+# Custom filenames only:
+create_chemtax_min_max("chemtax_ratios.csv", "chemtax_ratio_limits_100.csv",
+                          min_filename = "min_chem_100.csv",
+                          max_filename = "max_chem_100.csv")
+```

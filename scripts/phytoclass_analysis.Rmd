@@ -40,7 +40,8 @@ data <- client$get(chl_url)
 #Select the data and pigments that will be analyzed with phytoclass
 # rename columns for analysis and drop any rows with NAs
 h <- data %>%
-  filter(line_out_depth == 5 & site_id == "QU39" & analyzing_lab == "USC") %>% 
+  filter(line_out_depth == 5 & site_id == "QU39" & analyzing_lab == "USC") %>%
+  filter(date < "2019-01-01") %>% 
   select(date,
          site_id,
          depth = line_out_depth,
@@ -52,6 +53,7 @@ h <- data %>%
          Pra = prasinoxanthin,
          Allo = alloxanthin,
          Zea = zeaxanthin,
+         Lut = lutein,
          Chl_b = chl_b,
          Tchla = all_chl_a) %>% 
   drop_na() %>% 
@@ -62,7 +64,8 @@ h <- data %>%
   group_by(date) %>% 
   mutate(n = row_number()) %>% 
   ungroup() %>% 
-  unite(id, c(date, site_id, depth, n), sep = "-", remove = FALSE) #Create unique id for later joining
+  unite(id, c(date, site_id, depth, n), sep = "-", remove = FALSE)   #Create unique id for later joining
+
 
 h <- as.data.frame(h)
 
@@ -80,9 +83,12 @@ metadata <- h %>%
 ```
 
 ```{r}
-#running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepencies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
-results <- create_complete_phytoclass_setup("min_ratios_manu_v1.csv",
-                                       "max_ratios_manu_v1.csv")
+#running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepancies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
+results <- create_complete_phytoclass_setup("min_chem_100.csv",
+                                            "max_chem_100.csv")
+
+# results2 <- create_complete_phytoclass_setup("test_chem_min_new.csv",
+#                                             "test_chem_max_new_test.csv")
 
 min_max_matrix <- results$Min_max           # For phytoclass analysis
 pigment_matrix <- results$pigment_matrix    # Binary matrix (1/0)
@@ -127,9 +133,9 @@ for(i in seq_along(clusters)) {
     S = clusters[[i]], 
     F = pigment_matrix,
     user_defined_min_max = min_max_matrix,
-    do_matrix_checks = TRUE,
-    niter = 1, #Kept at one for initial analysis - recommended to be 500.
-    step = 0.01,
+    do_matrix_checks = T,
+    niter = 500, #Kept at one for initial analysis - recommended to be 500.
+    step = 0.006,
     weight.upper.bound = 30,
     verbose = F
   )
@@ -274,7 +280,7 @@ output_dm <- arrange(mutate(output_dm,
 
 ```{r}
 output_dm %>%
-  filter(year == 2016) %>% 
+  filter(year == 2015) %>% 
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
            stat = "identity", 
@@ -298,6 +304,8 @@ output_dm %>%
         axis.title.x = element_blank())
         # axis.text.y = element_blank())
 ```
+
+
 
 #See if I can CHEMTAX running in R and compare to my excel analysis
 #Try steepest decsent in phytoclass and CHEMTAX R package.
@@ -326,26 +334,29 @@ I need to research why the clustering approach they use is necessary - I used a 
 #Trying to run the steepest descent algorithm to also compare with the CHEMTAX results.
 #This is a similar method to chemtax, but there is no ratio limits, so ratios are unbounded.
 #In the manuscript they develop an R CHEMTAX, but not provided unfortunately. 
-MC <- Matrix_checks(data_matrix, pigment_matrix)
-Snew <- MC$Snew
-Fnew <- MC$Fnew
-SDRes <- Steepest_Desc(Snew, Fnew, num.loops = 1)
+
+
+# MC <- Matrix_checks(data_matrix, pigment_matrix)
+# Snew <- MC$Snew
+# Fnew <- MC$Fnew
+# SDRes <- Steepest_Desc(Snew, Fnew, num.loops = 1)
 
 #Something didn't work - giving zeros for most class abundances.
 ```
 
 ```{r}
 #Uploading example data
-Sm <- phytoclass::Sm
-Fm <- phytoclass::Fm
+# Sm <- phytoclass::Sm
+# Fm <- phytoclass::Fm
 ```
 
 ```{r}
 #Running on example data 
-MC <- Matrix_checks(Sm, Fm)
-Snew <- MC$Snew
-Fnew <- MC$Fnew
-SDRes <- Steepest_Desc(Snew, Fnew, num.loops = 10)
+
+# MC <- Matrix_checks(Sm, Fm)
+# Snew <- MC$Snew
+# Fnew <- MC$Fnew
+# SDRes <- Steepest_Desc(Snew, Fnew, num.loops = 10)
 
 #Not working - same error as on my data
 # plot(SDRes$Figure)
