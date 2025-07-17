@@ -49,8 +49,8 @@ h <- data %>%
          Per = peri,
          X19but = `_19_but`,
          Fuco = fuco,
-         X19hex = `_19_hex`,
          Pra = prasinoxanthin,
+         X19hex = `_19_hex`,
          Allo = alloxanthin,
          Zea = zeaxanthin,
          Lut = lutein,
@@ -83,16 +83,72 @@ metadata <- h %>%
 ```
 
 ```{r}
-#running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepancies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
-results <- create_complete_phytoclass_setup("min_chem_100.csv",
-                                            "max_chem_100.csv")
+cryp_allo <- data %>% 
+  mutate(allo_rat = alloxanthin/all_chl_a) %>% 
+  summarise(min = min(allo_rat, na.rm = T),
+            max = max(allo_rat, na.rm = T),
+            mean = mean(allo_rat, na.rm = T),
+            geometric_mean = exp(mean(log(allo_rat[allo_rat > 0]),
+                                       na.rm = TRUE)),
+            multiplier = 100*(max/geometric_mean))
 
-# results2 <- create_complete_phytoclass_setup("test_chem_min_new.csv",
-#                                             "test_chem_max_new_test.csv")
+hap_hex <- data %>% 
+  mutate(hex_rat = `_19_hex`/all_chl_a) %>% 
+  summarise(min = min(hex_rat, na.rm = T),
+            max = max(hex_rat, na.rm = T),
+            mean = mean(hex_rat, na.rm = T),
+            geometric_mean = exp(mean(log(hex_rat[hex_rat > 0]),
+                                       na.rm = TRUE)),
+            multiplier = 100*(max/geometric_mean))
+```
+
+```{r}
+data %>% 
+  ggplot(aes(x = chl_c1_c2, y = fuco, colour = all_chl_a)) +
+  geom_point() +
+  scale_color_viridis_b()
+
+data %>% 
+  ggplot(aes(x = `_19_hex`, y = `_19_but`, colour = all_chl_a)) +
+  geom_point() +
+  scale_color_viridis_b()
+
+data %>% 
+  ggplot(aes(x = prasinoxanthin, y = chl_b, colour = all_chl_a)) +
+  geom_point() +
+  scale_color_viridis_b()
+
+data %>% 
+  ggplot(aes(x = `_19_hex`, y = chl_c1_c2, colour = all_chl_a)) +
+  geom_point() +
+  scale_color_viridis_b()
+
+#Should try to re-assess this using microscopy
+```
+
+```{r}
+#running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepancies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
+results <- create_complete_phytoclass_setup("min_ratios_manu_v3.csv",
+                                            "max_ratios_manu_v3.csv")
 
 min_max_matrix <- results$Min_max           # For phytoclass analysis
 pigment_matrix <- results$pigment_matrix    # Binary matrix (1/0)
 ```
+
+```{r}
+#Test to see if data works
+simulated_annealing(
+    S = data_matrix,
+    F = pigment_matrix,
+    user_defined_min_max = min_max_matrix,
+    do_matrix_checks = T,
+    niter = 1, #Kept at one for initial analysis - recommended to be 500.
+    step = 0.09,
+    weight.upper.bound = 30,
+    verbose = T
+  )
+```
+
 
 ```{r}
 #Performs recommended pre-analysis clustering to group data with similar pigment ratios
@@ -135,7 +191,7 @@ for(i in seq_along(clusters)) {
     user_defined_min_max = min_max_matrix,
     do_matrix_checks = T,
     niter = 500, #Kept at one for initial analysis - recommended to be 500.
-    step = 0.006,
+    step = 0.09,
     weight.upper.bound = 30,
     verbose = F
   )
@@ -280,7 +336,7 @@ output_dm <- arrange(mutate(output_dm,
 
 ```{r}
 output_dm %>%
-  filter(year == 2015) %>% 
+  filter(year == 2016) %>% 
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
            stat = "identity", 
@@ -318,7 +374,7 @@ output_dm %>%
 #date+v
 #matrix_name
 
-# write.csv(output_dm, here("outputs", "qu39_manu_2025-07-08_niter-500.csv"))
+write.csv(output_dm, here("outputs", "manu_inputs2_2025-07-17_2.csv"))
 ```
 
 Running 500 iterations took about 35 minutes, but I ran on the full dataset and clusters - could be reduced by not doing full dataset. 

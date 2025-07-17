@@ -19,7 +19,7 @@ library(forcats)
 
 ```{r}
 #Upload phytoclass output
-p <- read.csv(here("outputs", "qu39_manu_2025-07-08_niter-500.csv"))
+p <- read.csv(here("outputs", "manu_inputs2_2025-07-17_2.csv"))
 
 #Upload CHEMTAX outputs. Here, I am uploading results from my manuscript runs, which only go until the end of 2018. I need to update the full timeseries using new clustering approaches etc.
 c <- read_xlsx(here("files", "chemtax_manu_2020_06_17.xlsx"))
@@ -283,9 +283,11 @@ p <- join %>%
 print(p)
 
 
-ggsave(here("figures", "phytoplankton_comparison.png"), plot = p,
+ggsave(here("figures", "phytoplankton_comparison_2025-07-17_2.png"), plot = p,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
+
+
 ```{r}
 # This now looks good. What are a few other widely used comparison metrics that should be reported and can they be put in a summary table or figure
 ```
@@ -620,7 +622,7 @@ m1 <- m_join_pc %>%
 # Print the plot
 print(m1)
 
-ggsave(here("figures", "phytoplankton_comparison_microscopy_phytoclass_2019_all.png"),
+ggsave(here("figures", "phytoplankton_comparison_microscopy_phytoclass_2019_all_2025-07-17_2.png"),
        plot = m1,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
