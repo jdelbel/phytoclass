@@ -1,0 +1,148 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#Loading packages
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(here)
+library(hakaiApi)
+library(phytoclass)
+```
+---
+Download data and wrangling
+---
+```{r}
+# Initialize the client
+client <- Client$new()
+```
+```{r}
+#Setting up Query
+endpoint <- "/eims/views/output/hplc"
+filter <- "site_id=QU39&"
+chl_url <- paste0("https://hecate.hakai.org/api", endpoint,"?limit=-1&", filter)
+data <- client$get(chl_url)
+```
+
+```{r}
+#Wrangling the data to prepare it for analysis
+
+# chlc1c2	
+# peri	
+# 19-but	
+# fuco	
+# 19-hex	
+# prasino	
+# viola	
+# lutein	
+# allo	
+# zea	
+# chl_b	
+# Tchl_a
+
+#Select the data and pigments that will be analyzed with phytoclass
+# rename columns for analysis and drop any rows with NAs
+h <- data %>%
+  filter(line_out_depth == 5 & site_id == "QU39" & analyzing_lab == "USC") %>%
+  select(
+         Date = date, 
+         Station = site_id,
+         `Sample #` = hakai_id,
+         depth = line_out_depth,
+         chlc1c2 = chl_c1_c2,
+         peri,
+         `19-but` = `_19_but`,
+         fuco = fuco,
+         `19-hex` = `_19_hex`,
+         prasino = prasinoxanthin,
+         viola = violaxanthin,
+         lutein,
+         allo = alloxanthin,
+         zea = zeaxanthin,
+         chl_b = chl_b,
+         Tchl_a = all_chl_a
+         ) %>% 
+  drop_na() %>% 
+  # Calculate daily averages across all pigments - need here as can cause errors with clustering
+  group_by(Date, Station, depth) %>%
+  summarise(across(chlc1c2:Tchl_a, ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+  # Add row numbers and create ID after averaging
+  group_by(Date) %>% 
+  mutate(n = row_number()) %>% 
+  ungroup() %>% 
+  unite(id, c(Date, Station, depth, n), sep = "-", remove = FALSE)   #Create unique id for later joining
+
+
+h <- as.data.frame(h)
+
+#Setting ID for rownames to associate metadata at later point.
+rownames(h) <- h$id
+
+#Creating data matrix for analysis
+data_matrix <- h %>% 
+  select(chlc1c2:Tchl_a)
+
+#Creating metadata column to join back with data later.
+metadata <- h %>% 
+  select(id:depth) 
+```
+
+```{r}
+# Perform clustering
+cluster_results <- Cluster(data_matrix, min_cluster_size = 14)
+
+# Extract cluster assignments - need to combine all clusters
+# Each element in cluster.list contains all samples assigned to that cluster
+all_cluster_assignments <- data.frame()
+
+for(i in seq_along(cluster_results$cluster.list)) {
+  cluster_data <- cluster_results$cluster.list[[i]]
+  cluster_assignments <- data.frame(
+    id = rownames(cluster_data),
+    cluster = i,
+    stringsAsFactors = FALSE
+  )
+  all_cluster_assignments <- rbind(all_cluster_assignments, cluster_assignments)
+}
+
+# Join cluster assignments back to original data
+h_with_clusters <- h %>%
+  left_join(all_cluster_assignments, by = "id") %>%
+  # Handle any samples that weren't assigned to clusters (shouldn't happen but just in case)
+  mutate(cluster_pc = ifelse(is.na(cluster), "unclustered", paste0("cluster_", cluster)))
+
+# Convert to dataframe and set rownames
+h_with_clusters <- as.data.frame(h_with_clusters)
+rownames(h_with_clusters) <- h_with_clusters$id
+
+
+
+# Optional: Create separate dataframes for each cluster for CHEMTAX
+# clusters_for_chemtax <- split(h_with_clusters, h_with_clusters$cluster)
+```
+
+```{r}
+# Add seasonal column based on astronomical seasons (Northern Hemisphere)
+h_with_clusters <- h_with_clusters %>%
+  mutate(
+    month_day = format(as.Date(Date), "%m-%d"),
+    season = case_when(
+      month_day >= "03-20" & month_day <= "06-20" ~ "Spring",
+      month_day >= "06-21" & month_day <= "09-21" ~ "Summer", 
+      month_day >= "09-22" & month_day <= "12-20" ~ "Fall",
+      TRUE ~ "Winter"  # Dec 21 - Mar 19
+    )
+  ) %>%
+  select(-month_day)  # Remove the temporary column
+```
+
+```{r}
+write.csv(h_with_clusters, here("chemtax_run", "phytoclass_clust_2025-07-18.csv"))
+```
+
+

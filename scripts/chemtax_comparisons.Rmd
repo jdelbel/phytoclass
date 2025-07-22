@@ -22,7 +22,7 @@ library(forcats)
 p <- read.csv(here("outputs", "manu_inputs2_2025-07-17_2.csv"))
 
 #Upload CHEMTAX outputs. Here, I am uploading results from my manuscript runs, which only go until the end of 2018. I need to update the full timeseries using new clustering approaches etc.
-c <- read_xlsx(here("files", "chemtax_manu_2020_06_17.xlsx"))
+c <- read_xlsx(here("files", "chem_manu_seasonal_500_2015_2025.xlsx"))
 
 #Importing wrangled microscopy data
 m <- read.csv(here("files", "micro_research_qu39_2024-06-18.csv"))
@@ -103,7 +103,11 @@ m_join_pc <- pc %>%
   left_join(m_join) %>% 
   select(-hakai_id) %>% 
   drop_na()
-  
+
+m_join_c <- cc %>%
+  left_join(m_join) %>% 
+  select(-hakai_id) %>% 
+  drop_na()
   
 #Unfortunately all of the 2015-2018 data are from 0m whereas the chemtax is from 5.
 #Another reason to update the chemtax data.
@@ -283,7 +287,7 @@ p <- join %>%
 print(p)
 
 
-ggsave(here("figures", "phytoplankton_comparison_2025-07-17_2.png"), plot = p,
+ggsave(here("figures", "pc_chem_2025-07-18_seaonal_500.png"), plot = p,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
 
@@ -472,10 +476,11 @@ formatted_table <- kable(metrics_table,
   add_header_above(c(" " = 5, "Absolute Errors" = 3, "Relative Errors" = 2, "Agreement" = 3))
 
 # Save as HTML
-save_kable(formatted_table, "comparison_table.html")
+save_kable(formatted_table, "comparison_table_chem_manu_seasonal_500.html")
 
 # Save as PNG (high quality)
-save_kable(formatted_table, here("figures", "comparison_table.png"), zoom = 2)
+save_kable(formatted_table, here("figures",
+                                 "comparison_table_chem_manu_seasonal_500.png"), zoom = 2)
 
 print("Table exported as:")
 print("- comparison_table.html")
@@ -627,3 +632,109 @@ ggsave(here("figures", "phytoplankton_comparison_microscopy_phytoclass_2019_all_
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
 
+```{r}
+# Calculate regression statistics for each group
+regression_stats_c_m <- m_join_c %>%
+  group_by(group) %>%
+  summarise(
+    # Fit linear model and extract statistics
+    model = list(lm(chla_c ~ group_count, data = cur_data())),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Extract model statistics safely
+    r_squared = map_dbl(model, ~ summary(.x)$r.squared),
+    slope = map_dbl(model, ~ coef(.x)[2]),
+    p_value = map_dbl(model, ~ {
+      model_summary <- summary(.x)
+      if (nrow(model_summary$coefficients) >= 2) {
+        model_summary$coefficients[2, 4]  # p-value for slope
+      } else {
+        NA
+      }
+    }),
+    # Create formatted statistics labels
+    r2_label = paste0("R² = ", sprintf("%.3f", r_squared)),
+    slope_label = paste0("Slope = ", sprintf("%.3f", slope)),
+    p_label = case_when(
+      is.na(p_value) ~ "p = NA",
+      p_value < 0.001 ~ "p < 0.001",
+      p_value < 0.01 ~ paste0("p = ", sprintf("%.3f", p_value)),
+      TRUE ~ paste0("p = ", sprintf("%.2f", p_value))
+    ),
+    stats_label = paste(r2_label, slope_label, p_label, sep = "\n")
+  )
+```
+
+
+
+
+```{r}
+
+m2 <- m_join_c %>%
+  ggplot(aes(x = group_count/10^4, y = chla_c)) +
+  # Add invisible dummy points to set equal axis limits
+  # geom_blank(data = dummy_data) +
+  geom_point(aes(color = group), alpha = 0.9, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", 
+              linewidth = 0.8, alpha = 0.4) +
+  # geom_abline(intercept = 0, slope = 1, linetype = "dashed", 
+  #             color = "red", alpha = 0.6, linewidth = 0.7) +
+  
+  scale_x_continuous(labels = label_number(accuracy = 0.1)) +
+  scale_y_continuous(labels = label_number(accuracy = 0.1)) +
+  
+  facet_wrap(~group, scales = "free", ncol = 3) +
+  
+  # Add regression statistics
+  geom_text(data = regression_stats_c_m,
+            aes(label = stats_label),
+            x = Inf, y = -Inf,
+            hjust = 1.1, vjust = -0.5,
+            size = 4, color = "black",
+            fontface = "bold") +
+  
+  # Styling
+  scale_color_npg_distinct(name = "Phytoplankton\nGroup") +
+  labs(
+    x = expression(paste("Abundance ","(cells x 10"^"4 ", "L"^"-1", ")")),
+    y = expression(paste("PhytoClass Chl ", italic("a"), " (mg m"^"-3", ")")),
+    title = "Comparison of Phytoplankton Community Estimates",
+    subtitle = 
+      "Microscopy vs PhytoClass Analysis by Taxonomic Group - All (0-5m mismatch, < 2019)",
+    caption = "Dashed red line = 1:1 relationship; Black line = linear regression with 95% CI"
+  ) +
+  theme_bw() +
+  theme(
+    # Panel and grid styling
+    panel.grid.major = element_line(color = "grey90", linewidth = 0.5),
+    panel.grid.minor = element_line(color = "grey95", linewidth = 0.25),
+    panel.border = element_rect(color = "black", linewidth = 0.8),
+    
+    # Text styling
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey20"),
+    plot.caption = element_text(size = 9, color = "grey40", hjust = 0),
+    
+    # Facet styling
+    strip.text = element_text(size = 11, face = "bold"),
+    strip.background = element_rect(fill = "grey95", color = "black"),
+    
+    # Legend styling
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "none", # Remove legend since color is redundant with facets
+    
+    # Overall plot margins
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+  )
+
+# Print the plot
+print(m2)
+
+ggsave(here("figures", "phytoplankton_comparison_microscopy_chemtax_500.png"),
+       plot = m2,
+       width = 12, height = 8, dpi = 300, bg = "white")
+```
