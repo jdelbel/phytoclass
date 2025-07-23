@@ -9,6 +9,7 @@ library(phytoclass)
 library(readxl)
 library(dplyr)
 library(tidyr)
+library(stringr)
 library(lubridate)
 library(ggplot2)
 library(forcats)
@@ -45,7 +46,7 @@ h <- data %>%
   select(date,
          site_id,
          depth = line_out_depth,
-         C12 = chl_c1_c2,
+         # C12 = chl_c1_c2,
          Per = peri,
          X19but = `_19_but`,
          Fuco = fuco,
@@ -59,7 +60,7 @@ h <- data %>%
   drop_na() %>% 
   # Calculate daily averages across all pigments - need here as can cause errors with clustering
   group_by(date, site_id, depth) %>%
-  summarise(across(C12:Tchla, ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+  summarise(across(Per:Tchla, ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
   # Add row numbers and create ID after averaging
   group_by(date) %>% 
   mutate(n = row_number()) %>% 
@@ -74,13 +75,49 @@ rownames(h) <- h$id
 
 #Creating data matrix for analysis
 data_matrix <- h %>% 
-  select(C12:Tchla)
+  select(Per:Tchla)
 
 #Creating metadata column to join back with data later.
 metadata <- h %>% 
   select(id:depth) %>% 
   rename(sample_id = id)
 ```
+
+```{r}
+# Define pigment columns (excluding TChla, date, site_id, depth, n, id)
+pigment_cols <- c("Per", "X19but", "Fuco", "Pra", "X19hex", "Allo", "Zea", "Lut", "Chl_b")
+
+# Calculate pigment:TChla ratios and find min/max for each pigment
+ratio_bounds <- h %>%
+  # Calculate ratios for each pigment
+  mutate(across(all_of(pigment_cols), ~ .x / Tchla, .names = "{.col}_ratio")) %>%
+  # Select only the ratio columns
+  select(ends_with("_ratio")) %>%
+  # Pivot to long format for easier processing
+  pivot_longer(everything(), names_to = "pigment", values_to = "ratio") %>%
+  # Remove "_ratio" suffix from pigment names
+  mutate(pigment = str_remove(pigment, "_ratio")) %>%
+  # Filter out any infinite, NaN, or negative values
+  filter(is.finite(ratio) & ratio >= 0) %>%
+  # Calculate min and max for each pigment
+  group_by(pigment) %>%
+  summarise(
+    min_ratio = min(ratio, na.rm = TRUE),
+    max_ratio = max(ratio, na.rm = TRUE),
+    n_samples = n(),
+    .groups = "drop"
+  ) %>%
+  # Handle zero minimum values - set to small positive value if needed
+  mutate(
+    min_ratio = ifelse(min_ratio == 0, 0.001, min_ratio),  # or use min_ratio * 0.1 if you prefer relative
+    # Optional: Add some buffer to avoid edge effects
+    min_ratio_buffered = min_ratio * 0.9,  # 10% buffer below observed min
+    max_ratio_buffered = max_ratio * 1.1   # 10% buffer above observed max
+  )
+```
+
+
+
 
 ```{r}
 cryp_allo <- data %>% 
@@ -128,8 +165,8 @@ data %>%
 
 ```{r}
 #running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepancies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
-results <- create_complete_phytoclass_setup("min_chem_100.csv",
-                                            "max_chem_100.csv")
+results <- create_complete_phytoclass_setup("min_chem_100_noc1c2_pras_lit.csv",
+                                            "max_chem_100_noc1c2_pras_lit.csv")
 
 min_max_matrix <- results$Min_max           # For phytoclass analysis
 pigment_matrix <- results$pigment_matrix    # Binary matrix (1/0)
@@ -157,17 +194,17 @@ test$Figure
 #Performs recommended pre-analysis clustering to group data with similar pigment ratios
 
 # Get clusters and remove Clust column
-clusters <- lapply(Cluster(data_matrix, min_cluster_size = 14)$cluster.list, #14 is default, but seems crazy
-                   function(x) { x$Clust <- NULL; x })
-
-# Add the full dataset as the first element so unclustered results can be compared to clustered.
-full_data <- data_matrix
-full_data$Clust <- NULL  # Remove cluster column if it exists
-clusters <- c(list(full_data), clusters)
-
-# Create names for each cluster in list including full dataset
-names(clusters) <- c("full_dataset", paste0("clust", seq_along(clusters[-1])))
-list2env(clusters, envir = .GlobalEnv)
+# clusters <- lapply(Cluster(data_matrix, min_cluster_size = 14)$cluster.list, #14 is default, but seems crazy
+#                    function(x) { x$Clust <- NULL; x })
+# 
+# # Add the full dataset as the first element so unclustered results can be compared to clustered.
+# full_data <- data_matrix
+# full_data$Clust <- NULL  # Remove cluster column if it exists
+# clusters <- c(list(full_data), clusters)
+# 
+# # Create names for each cluster in list including full dataset
+# names(clusters) <- c("full_dataset", paste0("clust", seq_along(clusters[-1])))
+# list2env(clusters, envir = .GlobalEnv)
 
 # Now you have full_dataset, clust1, clust2, clust3, etc. as separate dataframes
 ```
@@ -287,41 +324,35 @@ for(season_name in names(seasons)) {
 
 ```{r}
 #If turned on, this will remove the full dataset from the list - likely not necessary to analyze the full dataset each time, just useful to assess the effect of running the analysis on the individual clusters.
-clusters[[1]] <- NULL
+# clusters[[1]] <- NULL
 ```
 
 
 
 ```{r}
 # Set seed once for reproducibility
-set.seed(7683)
-
-# Run phytoclass analysis on full dataset and all clusters independently
-results_list <- list()
-for(i in seq_along(clusters)) {
-  dataset_name <- names(clusters)[i]
-  cat("Processing", dataset_name, "(", i, "of", length(clusters), ")\n")
-  
-  results_list[[i]] <- simulated_annealing(
-    S = clusters[[i]], 
-    F = pigment_matrix,
-    user_defined_min_max = min_max_matrix,
-    do_matrix_checks = T,
-    niter = 500, #Kept at one for initial analysis - recommended to be 500.
-    step = 0.09,
-    weight.upper.bound = 30,
-    verbose = F
-  )
-  
-  names(results_list)[i] <- dataset_name
-}
+# set.seed(7683)
+# 
+# # Run phytoclass analysis on full dataset and all clusters independently
+# results_list <- list()
+# for(i in seq_along(clusters)) {
+#   dataset_name <- names(clusters)[i]
+#   cat("Processing", dataset_name, "(", i, "of", length(clusters), ")\n")
+#   
+#   results_list[[i]] <- simulated_annealing(
+#     S = clusters[[i]], 
+#     F = pigment_matrix,
+#     user_defined_min_max = min_max_matrix,
+#     do_matrix_checks = T,
+#     niter = 500, #Kept at one for initial analysis - recommended to be 500.
+#     step = 0.09,
+#     weight.upper.bound = 30,
+#     verbose = F
+#   )
+#   
+#   names(results_list)[i] <- dataset_name
+# }
 ```
-
-```{r}
-
-```
-
-
 
 ```{r}
 # Extract RMSE and condition number from results for each cluster and the full dataset
@@ -333,15 +364,73 @@ cluster_summary <- data.frame(
   # Add a column to distinguish full dataset from clusters
   mutate(
     type = ifelse(dataset == "full_dataset", "Full Dataset", "Cluster"),
-    sample_size = sapply(clusters, nrow)
+    sample_size = sapply(seasons, nrow)#clusters
   ) %>%
   # Order with full dataset first, then clusters by RMSE
   arrange(type == "Cluster", RMSE)
 
 # Save as CSV for assessment
-# write.csv(cluster_summary, here("summaries", "cluster_analysis_summary_full.csv"),
-#           row.names = FALSE)
+write.csv(cluster_summary, here("summaries", "stats_manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"),
+          row.names = FALSE)
 ```
+
+```{r}
+# Function to extract F matrix from a single result and add identifier
+extract_f_matrix <- function(result, season_name) {
+  f_matrix <- result$`F matrix`
+  
+  # Convert to dataframe and add season identifier
+  f_df <- as.data.frame(f_matrix)
+  f_df$season <- season_name
+  f_df$pigment <- rownames(f_matrix)
+  
+  # Move identifier columns to front
+  f_df <- f_df %>%
+    select(season, pigment, everything())
+  
+  return(f_df)
+}
+
+# Extract F matrices from all results and combine
+combined_f_matrices <- map2_dfr(results_list, names(results_list), extract_f_matrix)
+
+
+# Optional: Pivot to long format for easier analysis/plotting
+f_matrices_long <- combined_f_matrices %>%
+  pivot_longer(cols = -c(season, pigment), 
+               names_to = "phyto_group", 
+               values_to = "ratio") %>%
+  # Remove any rows where ratio might be NA or 0 if desired
+  filter(!is.na(ratio) & ratio > 0)
+
+print("Long format sample:")
+print(head(f_matrices_long))
+
+# Optional: Create a summary showing which pigments vary most between seasons
+pigment_variation <- f_matrices_long %>%
+  group_by(pigment, phyto_group) %>%
+  summarise(
+    min_ratio = min(ratio, na.rm = TRUE),
+    max_ratio = max(ratio, na.rm = TRUE),
+    ratio_range = round((max_ratio - min_ratio), 2),
+    cv = round((sd(ratio, na.rm = TRUE) / mean(ratio, na.rm = TRUE)), 2),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(ratio_range))
+
+write.csv(combined_f_matrices, here("summaries", "out_matrix_manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"),
+          row.names = FALSE)
+
+write.csv(pigment_variation, here("summaries", "out_variation_manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"),
+          row.names = FALSE)
+
+print("Pigments with highest seasonal variation:")
+print(head(pigment_variation, 10))
+```
+
+
+
+
 
 ```{r}
 # Scatter plot showing both metrics -  review what these mean and provide thresholds and information
@@ -462,7 +551,7 @@ output_dm %>%
   filter(year == 2019) %>%
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
-           stat = "identity", 
+           stat =  "identity", 
            alpha = 1, color = "black", size = 1) +
   scale_fill_npg_distinct() +
   facet_grid(analysis_type ~.) +
@@ -497,7 +586,7 @@ output_dm %>%
 #date+v
 #matrix_name
 
-write.csv(output_dm, here("outputs", "manu_inputs_100_all_seasons_2025-07-22.csv"))
+write.csv(output_dm, here("outputs", "manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"))
 ```
 
 Running 500 iterations took about 35 minutes, but I ran on the full dataset and clusters - could be reduced by not doing full dataset. 

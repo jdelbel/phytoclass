@@ -19,7 +19,7 @@ library(forcats)
 
 ```{r}
 #Upload phytoclass output
-p <- read.csv(here("outputs", "manu_inputs2_2025-07-17_2.csv"))
+p <- read.csv(here("outputs", "manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"))
 
 #Upload CHEMTAX outputs. Here, I am uploading results from my manuscript runs, which only go until the end of 2018. I need to update the full timeseries using new clustering approaches etc.
 c <- read_xlsx(here("files", "chem_manu_seasonal_500_2015_2025.xlsx"))
@@ -287,7 +287,7 @@ p <- join %>%
 print(p)
 
 
-ggsave(here("figures", "pc_chem_2025-07-18_seaonal_500.png"), plot = p,
+ggsave(here("figures", "pc_chem_2025-07-22_seasonal_no_c1c2_500_chem_lit_lims_GA.png"), plot = p,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
 
@@ -438,7 +438,7 @@ join %>%
   group_by(date, site_id, depth, group, analysis_type) %>% 
   summarise(chla = mean(chla), .groups = "drop") %>% 
   mutate(year = year(date)) %>% 
-  filter(year == 2018) %>%
+  filter(year == 2023) %>%
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
            stat = "identity", 
@@ -480,7 +480,7 @@ save_kable(formatted_table, "comparison_table_chem_manu_seasonal_500.html")
 
 # Save as PNG (high quality)
 save_kable(formatted_table, here("figures",
-                                 "comparison_table_chem_manu_seasonal_500.png"), zoom = 2)
+                                 "comparison_table_2025-07-22_seasonal_both_100_500.png"), zoom = 2)
 
 print("Table exported as:")
 print("- comparison_table.html")
@@ -627,7 +627,7 @@ m1 <- m_join_pc %>%
 # Print the plot
 print(m1)
 
-ggsave(here("figures", "phytoplankton_comparison_microscopy_phytoclass_2019_all_2025-07-17_2.png"),
+ggsave(here("figures", "phytoplankton_comparison_microscopy_2025-07-22_seasonal_both_100_500.png"),
        plot = m1,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
