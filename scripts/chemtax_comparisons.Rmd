@@ -19,7 +19,7 @@ library(forcats)
 
 ```{r}
 #Upload phytoclass output
-p <- read.csv(here("outputs", "manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"))
+p <- read.csv(here("outputs", "manu_min_lit_to_dino_cyano.csv"))
 
 #Upload CHEMTAX outputs. Here, I am uploading results from my manuscript runs, which only go until the end of 2018. I need to update the full timeseries using new clustering approaches etc.
 c <- read_xlsx(here("files", "chem_manu_seasonal_500_2015_2025.xlsx"))
@@ -287,7 +287,7 @@ p <- join %>%
 print(p)
 
 
-ggsave(here("figures", "pc_chem_2025-07-22_seasonal_no_c1c2_500_chem_lit_lims_GA.png"), plot = p,
+ggsave(here("figures", "manu_min_lit_to_dino_cyano.png"), plot = p,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
 

@@ -121,6 +121,7 @@ ratio_bounds <- h %>%
 
 ```{r}
 cryp_allo <- data %>% 
+  filter(alloxanthin > 0) %>% 
   mutate(allo_rat = alloxanthin/all_chl_a) %>% 
   summarise(min = min(allo_rat, na.rm = T),
             max = max(allo_rat, na.rm = T),
@@ -165,8 +166,8 @@ data %>%
 
 ```{r}
 #running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepancies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
-results <- create_complete_phytoclass_setup("min_chem_100_noc1c2_pras_lit.csv",
-                                            "max_chem_100_noc1c2_pras_lit.csv")
+results <- create_complete_phytoclass_setup("min_lit_to_dino_cyano.csv",
+                                            "max_lit_to_dino_cyano.csv")
 
 min_max_matrix <- results$Min_max           # For phytoclass analysis
 pigment_matrix <- results$pigment_matrix    # Binary matrix (1/0)
@@ -370,7 +371,7 @@ cluster_summary <- data.frame(
   arrange(type == "Cluster", RMSE)
 
 # Save as CSV for assessment
-write.csv(cluster_summary, here("summaries", "stats_manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"),
+write.csv(cluster_summary, here("summaries", "stats_min_lit_to_dino_cyano.csv"),
           row.names = FALSE)
 ```
 
@@ -418,10 +419,10 @@ pigment_variation <- f_matrices_long %>%
   ) %>%
   arrange(desc(ratio_range))
 
-write.csv(combined_f_matrices, here("summaries", "out_matrix_manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"),
+write.csv(combined_f_matrices, here("summaries", "out_matrix_min_lit_to_dino_cyano.csv"),
           row.names = FALSE)
 
-write.csv(pigment_variation, here("summaries", "out_variation_manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"),
+write.csv(pigment_variation, here("summaries", "out_variation_min_lit_to_dino_cyano.csv"),
           row.names = FALSE)
 
 print("Pigments with highest seasonal variation:")
@@ -548,7 +549,7 @@ output_dm <- arrange(mutate(output_dm,
 
 ```{r}
 output_dm %>%
-  filter(year == 2019) %>%
+  filter(year == 2017) %>%
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
            stat =  "identity", 
@@ -586,7 +587,7 @@ output_dm %>%
 #date+v
 #matrix_name
 
-write.csv(output_dm, here("outputs", "manu_inputs_100_all_seasons_no_c1c2_2025-07-23_GA_lit.csv"))
+write.csv(output_dm, here("outputs", "manu_min_lit_to_dino_cyano.csv"))
 ```
 
 Running 500 iterations took about 35 minutes, but I ran on the full dataset and clusters - could be reduced by not doing full dataset. 
