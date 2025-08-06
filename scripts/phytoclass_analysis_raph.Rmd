@@ -120,72 +120,25 @@ ratio_bounds <- h %>%
 
 
 
-```{r}
-cryp_allo <- data %>% 
-  filter(alloxanthin > 0) %>% 
-  mutate(allo_rat = alloxanthin/all_chl_a) %>% 
-  summarise(min = min(allo_rat, na.rm = T),
-            max = max(allo_rat, na.rm = T),
-            mean = mean(allo_rat, na.rm = T),
-            geometric_mean = exp(mean(log(allo_rat[allo_rat > 0]),
-                                       na.rm = TRUE)),
-            multiplier = 100*(max/geometric_mean))
 
-hap_hex <- data %>% 
-  mutate(hex_rat = `_19_hex`/all_chl_a) %>% 
-  summarise(min = min(hex_rat, na.rm = T),
-            max = max(hex_rat, na.rm = T),
-            mean = mean(hex_rat, na.rm = T),
-            geometric_mean = exp(mean(log(hex_rat[hex_rat > 0]),
-                                       na.rm = TRUE)),
-            multiplier = 100*(max/geometric_mean))
 
-hap_hex <- data %>% 
-  mutate(hex_rat = `_19_hex`/all_chl_a) %>% 
-  summarise(min = min(hex_rat, na.rm = T),
-            max = max(hex_rat, na.rm = T),
-            mean = mean(hex_rat, na.rm = T),
-            geometric_mean = exp(mean(log(hex_rat[hex_rat > 0]),
-                                       na.rm = TRUE)),
-            multiplier = 100*(max/geometric_mean))
-```
 
-```{r}
-test2 <- data %>%
-  mutate(viola_rat = violaxanthin/all_chl_a) %>% 
-  select(date, viola_rat, violaxanthin, all_chl_a) %>% 
-  drop_na()
-```
 
 
 ```{r}
 data %>% 
-  ggplot(aes(x = chl_c1_c2, y = fuco, colour = all_chl_a)) +
+  ggplot(aes(x = chl_c3, y = fuco, colour = all_chl_a)) +
   geom_point() +
   scale_color_viridis_b()
 
-data %>% 
-  ggplot(aes(x = `_19_hex`, y = `_19_but`, colour = all_chl_a)) +
-  geom_point() +
-  scale_color_viridis_b()
-
-data %>% 
-  ggplot(aes(x = prasinoxanthin, y = chl_b, colour = all_chl_a)) +
-  geom_point() +
-  scale_color_viridis_b()
-
-data %>% 
-  ggplot(aes(x = violaxanthin, y = fuco, colour = all_chl_a)) +
-  geom_point() +
-  scale_color_viridis_b()
 
 #Should try to re-assess this using microscopy
 ```
 
 ```{r}
 #running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepancies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
-results <- create_complete_phytoclass_setup("min_lit_raph.csv",
-                                            "max_lit_raph.csv")
+results <- create_complete_phytoclass_setup("min_lit_raph_diat_fuco_viol.csv",
+                                            "max_lit_raph_diat_fuco_viol.csv")
 
 min_max_matrix <- results$Min_max           # For phytoclass analysis
 pigment_matrix <- results$pigment_matrix    # Binary matrix (1/0)
@@ -389,7 +342,7 @@ cluster_summary <- data.frame(
   arrange(type == "Cluster", RMSE)
 
 # Save as CSV for assessment
-write.csv(cluster_summary, here("summaries", "stats_min_lit_raph.csv"),
+write.csv(cluster_summary, here("summaries", "stats_min_lit_raph_diat_fuco_viol.csv"),
           row.names = FALSE)
 ```
 
@@ -437,10 +390,10 @@ pigment_variation <- f_matrices_long %>%
   ) %>%
   arrange(desc(ratio_range))
 
-write.csv(combined_f_matrices, here("summaries", "out_matrix_min_lit_raph.csv"),
+write.csv(combined_f_matrices, here("summaries", "out_matrix_min_lit_raph_diat_fuco_viol.csv"),
           row.names = FALSE)
 
-write.csv(pigment_variation, here("summaries", "out_variation_min_lit_raph.csv"),
+write.csv(pigment_variation, here("summaries", "out_variation_min_lit_raph_diat_fuco_viol.csv"),
           row.names = FALSE)
 
 print("Pigments with highest seasonal variation:")
@@ -562,7 +515,7 @@ scale_fill_npg_distinct <- function(...) {
 #Setting plotting order phytoplankton groups
 #Order phytoplankton groups roughly from smallest to largest - create order list
 order_chem <- c("cyan", "hapt", "GA", "cryp",
-                   "dino", "raph", "dict", "raph", "diat")
+                   "dino", "dict", "raph", "diat")
 
 #Chemtax full data - Specify order of phyto groups for figures
 output_dm <- arrange(mutate(output_dm,
@@ -573,7 +526,7 @@ output_dm <- arrange(mutate(output_dm,
 
 ```{r}
 output_dm %>%
-  filter(year == 2024) %>%
+  filter(year == 2017) %>%
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
            stat =  "identity", 
@@ -611,7 +564,7 @@ output_dm %>%
 #date+v
 #matrix_name
 
-write.csv(output_dm, here("outputs", "manu_min_no_fuco.csv"))
+write.csv(output_dm, here("outputs", "min_lit_raph_diat_fuco_viol.csv"))
 ```
 
 Running 500 iterations took about 35 minutes, but I ran on the full dataset and clusters - could be reduced by not doing full dataset. 
@@ -622,6 +575,17 @@ Start with just straight up comparison
 
 
 I need to research why the clustering approach they use is necessary - I used a different one (Swan et al.). 
+
+```{r}
+h %>% 
+  ggplot(aes(date, Zea/Tchla)) +
+  geom_line()
+
+h %>% 
+  ggplot(aes(Viol, Chl_b)) +
+  geom_point()
+```
+
 
 ```{r}
 #Trying to run the steepest descent algorithm to also compare with the CHEMTAX results.

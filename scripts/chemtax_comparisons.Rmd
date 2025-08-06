@@ -19,7 +19,7 @@ library(forcats)
 
 ```{r}
 #Upload phytoclass output
-p <- read.csv(here("outputs", "manu_min_lit_to_dino_cyano.csv"))
+p <- read.csv(here("outputs", "manu_min_lit_to_dino_cyano_hapt_dict.csv"))
 
 #Upload CHEMTAX outputs. Here, I am uploading results from my manuscript runs, which only go until the end of 2018. I need to update the full timeseries using new clustering approaches etc.
 c <- read_xlsx(here("files", "chem_manu_seasonal_500_2015_2025.xlsx"))
@@ -68,7 +68,8 @@ join <- pc %>%
   drop_na() %>% 
   mutate(diff = chla_c - chla_pc,
          chla_c = round(chla_c, 2),
-         diff = round(diff, 2))
+         diff = round(diff, 2)) %>% 
+  filter(date != as.Date("2021-01-27"))
 
 ```
 ```{r}
@@ -97,7 +98,8 @@ m_join <- m_class %>%
   mutate(date = date(date)) %>% 
   rename(depth_m = depth)
            
-
+# join2 <- join %>% 
+#   left_join(m_join)
 
 m_join_pc <- pc %>%
   left_join(m_join) %>% 
@@ -220,6 +222,10 @@ order_chem <- c("cyan", "hapt", "GA", "cryp",
 join <- arrange(mutate(join,
                        group = factor(group,
                                       levels = order_chem)))
+# join2 <- arrange(mutate(join2,
+#                        group = factor(group,
+#                                       levels = order_chem)))
+
 ```
 
 ```{r}
@@ -287,7 +293,7 @@ p <- join %>%
 print(p)
 
 
-ggsave(here("figures", "manu_min_lit_to_dino_cyano.png"), plot = p,
+ggsave(here("figures", "summary_lims_dict_diff.png"), plot = p,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
 
@@ -438,7 +444,7 @@ join %>%
   group_by(date, site_id, depth, group, analysis_type) %>% 
   summarise(chla = mean(chla), .groups = "drop") %>% 
   mutate(year = year(date)) %>% 
-  filter(year == 2023) %>%
+  filter(year == 2018) %>%
   ggplot() +
   geom_area(aes(date, chla, fill = fct_rev(group)),
            stat = "identity", 
@@ -461,6 +467,53 @@ join %>%
         axis.text = element_text(color = "black"),
         axis.title.x = element_blank())
         # axis.text.y = element_blank())
+```
+
+```{r}
+#Plot the time-series comparison with an option to zoom in on certain years.
+# join2 %>%
+#   select(-diff) %>% 
+#   pivot_longer(c(chla_c, chla_pc, group_count),
+#                names_to = "analysis_type",
+#                values_to = "chla") %>% 
+#   group_by(date, site_id, depth, group, analysis_type) %>% 
+#   summarise(chla = mean(chla), .groups = "drop") %>% 
+#   mutate(year = year(date)) %>% 
+#   filter(year == 2017) %>%
+#   ggplot() +
+#   geom_area(aes(date, chla, fill = fct_rev(group)),
+#            stat = "identity", 
+#            alpha = 1, color = "black", size = 1) +
+#   scale_fill_npg_distinct() +
+#   facet_grid(analysis_type ~., scales = "free_y") +
+#   # scale_x_date(limits = as.Date(c("2024-01-01", "2024-12-31")),
+#   #              expand = c(0, 0),
+#   #              date_breaks = "months", date_labels = "%b") +
+#   theme_bw() +
+#   labs(y = bquote("Phyto. (mg" ~ m^-3*")"),
+#        fill = "Group") +
+#   theme(
+#         legend.position = "right",
+#         # legend.position = c(1.02, 0.5),
+#         legend.key.height = unit(0.5, "cm"),
+#         # legend.text = element_text(size = 25),
+#         legend.title = element_blank(),
+#         text = element_text(size = 38), #35
+#         axis.text = element_text(color = "black"),
+#         axis.title.x = element_blank())
+#         # axis.text.y = element_blank())
+```
+
+
+
+
+
+```{r}
+hapt_m <- m %>% 
+  filter(group == "Prymnesiophyta-Haptophyta")
+
+hapt_c <- join %>% 
+  filter(group == "hapt")
 ```
 
 
@@ -627,7 +680,7 @@ m1 <- m_join_pc %>%
 # Print the plot
 print(m1)
 
-ggsave(here("figures", "phytoplankton_comparison_microscopy_2025-07-22_seasonal_both_100_500.png"),
+ggsave(here("figures", "summary_lims_dict_diff.png"),
        plot = m1,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```
@@ -734,7 +787,7 @@ m2 <- m_join_c %>%
 # Print the plot
 print(m2)
 
-ggsave(here("figures", "phytoplankton_comparison_microscopy_chemtax_500.png"),
+ggsave(here("figures", "summary_lims_dict_diff_micro.png"),
        plot = m2,
        width = 12, height = 8, dpi = 300, bg = "white")
 ```

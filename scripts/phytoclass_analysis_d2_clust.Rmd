@@ -46,6 +46,7 @@ h <- data %>%
   select(date,
          site_id,
          depth = line_out_depth,
+         chl_c3,
          # C12 = chl_c1_c2,
          Per = peri,
          X19but = `_19_but`,
@@ -61,7 +62,7 @@ h <- data %>%
   drop_na() %>% 
   # Calculate daily averages across all pigments - need here as can cause errors with clustering
   group_by(date, site_id, depth) %>%
-  summarise(across(Per:Tchla, ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+  summarise(across(chl_c3:Tchla, ~ mean(.x, na.rm = TRUE)), .groups = "drop") %>%
   # Add row numbers and create ID after averaging
   group_by(date) %>% 
   mutate(n = row_number()) %>% 
@@ -76,7 +77,7 @@ rownames(h) <- h$id
 
 #Creating data matrix for analysis
 data_matrix <- h %>% 
-  select(Per:Tchla)
+  select(chl_c3:Tchla)
 
 #Creating metadata column to join back with data later.
 metadata <- h %>% 
@@ -120,72 +121,17 @@ ratio_bounds <- h %>%
 
 
 
-```{r}
-cryp_allo <- data %>% 
-  filter(alloxanthin > 0) %>% 
-  mutate(allo_rat = alloxanthin/all_chl_a) %>% 
-  summarise(min = min(allo_rat, na.rm = T),
-            max = max(allo_rat, na.rm = T),
-            mean = mean(allo_rat, na.rm = T),
-            geometric_mean = exp(mean(log(allo_rat[allo_rat > 0]),
-                                       na.rm = TRUE)),
-            multiplier = 100*(max/geometric_mean))
-
-hap_hex <- data %>% 
-  mutate(hex_rat = `_19_hex`/all_chl_a) %>% 
-  summarise(min = min(hex_rat, na.rm = T),
-            max = max(hex_rat, na.rm = T),
-            mean = mean(hex_rat, na.rm = T),
-            geometric_mean = exp(mean(log(hex_rat[hex_rat > 0]),
-                                       na.rm = TRUE)),
-            multiplier = 100*(max/geometric_mean))
-
-hap_hex <- data %>% 
-  mutate(hex_rat = `_19_hex`/all_chl_a) %>% 
-  summarise(min = min(hex_rat, na.rm = T),
-            max = max(hex_rat, na.rm = T),
-            mean = mean(hex_rat, na.rm = T),
-            geometric_mean = exp(mean(log(hex_rat[hex_rat > 0]),
-                                       na.rm = TRUE)),
-            multiplier = 100*(max/geometric_mean))
-```
-
-```{r}
-test2 <- data %>%
-  mutate(viola_rat = violaxanthin/all_chl_a) %>% 
-  select(date, viola_rat, violaxanthin, all_chl_a) %>% 
-  drop_na()
-```
 
 
-```{r}
-data %>% 
-  ggplot(aes(x = chl_c1_c2, y = fuco, colour = all_chl_a)) +
-  geom_point() +
-  scale_color_viridis_b()
 
-data %>% 
-  ggplot(aes(x = `_19_hex`, y = `_19_but`, colour = all_chl_a)) +
-  geom_point() +
-  scale_color_viridis_b()
 
-data %>% 
-  ggplot(aes(x = prasinoxanthin, y = chl_b, colour = all_chl_a)) +
-  geom_point() +
-  scale_color_viridis_b()
 
-data %>% 
-  ggplot(aes(x = violaxanthin, y = fuco, colour = all_chl_a)) +
-  geom_point() +
-  scale_color_viridis_b()
 
-#Should try to re-assess this using microscopy
-```
 
 ```{r}
 #running functions to extract standardized input matrices for analysis - Set up so everything is correct; however, phytoclass is very finicky and any small discrepancies between pigment or group names will throw it off. Min Max ratios also have a difference threshold, which is build into the error checking.
-results <- create_complete_phytoclass_setup("min_lit_raph.csv",
-                                            "max_lit_raph.csv")
+results <- create_complete_phytoclass_setup("min_lit_d2.csv",
+                                            "max_lit_d2.csv")
 
 min_max_matrix <- results$Min_max           # For phytoclass analysis
 pigment_matrix <- results$pigment_matrix    # Binary matrix (1/0)
@@ -213,17 +159,17 @@ test$Figure
 #Performs recommended pre-analysis clustering to group data with similar pigment ratios
 
 # Get clusters and remove Clust column
-# clusters <- lapply(Cluster(data_matrix, min_cluster_size = 14)$cluster.list, #14 is default, but seems crazy
-#                    function(x) { x$Clust <- NULL; x })
-# 
+clusters <- lapply(Cluster(data_matrix, min_cluster_size = 30)$cluster.list, #14 is default, but seems crazy
+                   function(x) { x$Clust <- NULL; x })
+#
 # # Add the full dataset as the first element so unclustered results can be compared to clustered.
-# full_data <- data_matrix
-# full_data$Clust <- NULL  # Remove cluster column if it exists
-# clusters <- c(list(full_data), clusters)
-# 
+full_data <- data_matrix
+full_data$Clust <- NULL  # Remove cluster column if it exists
+clusters <- c(list(full_data), clusters)
+#
 # # Create names for each cluster in list including full dataset
-# names(clusters) <- c("full_dataset", paste0("clust", seq_along(clusters[-1])))
-# list2env(clusters, envir = .GlobalEnv)
+names(clusters) <- c("full_dataset", paste0("clust", seq_along(clusters[-1])))
+list2env(clusters, envir = .GlobalEnv)
 
 # Now you have full_dataset, clust1, clust2, clust3, etc. as separate dataframes
 ```
@@ -231,110 +177,110 @@ test$Figure
 ```{r}
 # Create seasonal subsets based on astronomical seasons
 # Assumes you have data_matrix (pigments only) and metadata (with sample_id and date)
-create_seasonal_subsets <- function(data_matrix, metadata, sample_id_col = "sample_id", date_col = "date") {
-  
-  # Ensure metadata date column is Date class
-  if(!inherits(metadata[[date_col]], "Date")) {
-    metadata[[date_col]] <- as.Date(metadata[[date_col]])
-  }
-  
-  # Function to determine astronomical season for a given date
-  get_astronomical_season <- function(date) {
-    year <- year(date)
-    month <- month(date)
-    day <- day(date)
-    
-    # Approximate dates for astronomical seasons (Northern Hemisphere)
-    # Spring Equinox: ~March 20-21
-    # Summer Solstice: ~June 20-21  
-    # Autumn Equinox: ~September 22-23
-    # Winter Solstice: ~December 21-22
-    
-    if ((month == 3 & day >= 20) | month %in% c(4, 5) | (month == 6 & day < 21)) {
-      return("spring")
-    } else if ((month == 6 & day >= 21) | month %in% c(7, 8) | (month == 9 & day < 22)) {
-      return("summer") 
-    } else if ((month == 9 & day >= 22) | month %in% c(10, 11) | (month == 12 & day < 21)) {
-      return("autumn")
-    } else {
-      return("winter")
-    }
-  }
-  
-  # Add season classification to metadata
-  metadata$season <- sapply(metadata[[date_col]], get_astronomical_season)
-  
-  # Match data_matrix rownames to metadata sample_id
-  # Assuming rownames(data_matrix) correspond to metadata sample_id
-  sample_seasons <- metadata$season[match(rownames(data_matrix), metadata[[sample_id_col]])]
-  
-  # Create seasonal subsets of data_matrix
-  spring_data <- data_matrix[sample_seasons == "spring" & !is.na(sample_seasons), , drop = FALSE]
-  summer_data <- data_matrix[sample_seasons == "summer" & !is.na(sample_seasons), , drop = FALSE]
-  autumn_data <- data_matrix[sample_seasons == "autumn" & !is.na(sample_seasons), , drop = FALSE]
-  winter_data <- data_matrix[sample_seasons == "winter" & !is.na(sample_seasons), , drop = FALSE]
-  
-  # Create list similar to clustering approach
-  seasons <- list(
-    full_dataset = data_matrix,
-    spring = spring_data,
-    summer = summer_data, 
-    autumn = autumn_data,
-    winter = winter_data
-  )
-  
-  return(seasons)
-}
-
-# Apply seasonal subsetting
-# Adjust column names to match your actual metadata structure
-seasons <- create_seasonal_subsets(data_matrix, metadata, 
-                                 sample_id_col = "sample_id", 
-                                 date_col = "date")
-
-# Add to global environment (similar to your clustering approach)
-list2env(seasons, envir = .GlobalEnv)
-
-# Remove full dataset if desired (similar to your clustering approach)
-seasons[[1]] <- NULL
-
-# Set seed once for reproducibility  
-set.seed(7683)
-
-# Run phytoclass analysis on full dataset and all seasons independently
-results_list <- list()
-for(i in seq_along(seasons)) {
-  season_name <- names(seasons)[i]
-  cat("Processing", season_name, "(", i, "of", length(seasons), ")\n")
-  
-  # Check if season has enough data (similar to min_cluster_size)
-  if(nrow(seasons[[i]]) < 14) {
-    cat("Warning:", season_name, "has only", nrow(seasons[[i]]), "samples - consider combining seasons or using full dataset\n")
-    next
-  }
-  
-  results_list[[i]] <- simulated_annealing(
-    S = seasons[[i]], 
-    F = pigment_matrix,
-    user_defined_min_max = min_max_matrix, # You'll want season-specific matrices here eventually
-    do_matrix_checks = T,
-    niter = 500,
-    step = 0.09,
-    weight.upper.bound = 30,
-    verbose = F
-  )
-  
-  names(results_list)[i] <- season_name
-}
-
-# Remove NULL elements (seasons with insufficient data)
-results_list <- results_list[!sapply(results_list, is.null)]
-
-# Print summary of seasonal data sizes
-cat("\nSeasonal data summary:\n")
-for(season_name in names(seasons)) {
-  cat(season_name, ":", nrow(seasons[[season_name]]), "samples\n")
-}
+# create_seasonal_subsets <- function(data_matrix, metadata, sample_id_col = "sample_id", date_col = "date") {
+#   
+#   # Ensure metadata date column is Date class
+#   if(!inherits(metadata[[date_col]], "Date")) {
+#     metadata[[date_col]] <- as.Date(metadata[[date_col]])
+#   }
+#   
+#   # Function to determine astronomical season for a given date
+#   get_astronomical_season <- function(date) {
+#     year <- year(date)
+#     month <- month(date)
+#     day <- day(date)
+#     
+#     # Approximate dates for astronomical seasons (Northern Hemisphere)
+#     # Spring Equinox: ~March 20-21
+#     # Summer Solstice: ~June 20-21  
+#     # Autumn Equinox: ~September 22-23
+#     # Winter Solstice: ~December 21-22
+#     
+#     if ((month == 3 & day >= 20) | month %in% c(4, 5) | (month == 6 & day < 21)) {
+#       return("spring")
+#     } else if ((month == 6 & day >= 21) | month %in% c(7, 8) | (month == 9 & day < 22)) {
+#       return("summer") 
+#     } else if ((month == 9 & day >= 22) | month %in% c(10, 11) | (month == 12 & day < 21)) {
+#       return("autumn")
+#     } else {
+#       return("winter")
+#     }
+#   }
+#   
+#   # Add season classification to metadata
+#   metadata$season <- sapply(metadata[[date_col]], get_astronomical_season)
+#   
+#   # Match data_matrix rownames to metadata sample_id
+#   # Assuming rownames(data_matrix) correspond to metadata sample_id
+#   sample_seasons <- metadata$season[match(rownames(data_matrix), metadata[[sample_id_col]])]
+#   
+#   # Create seasonal subsets of data_matrix
+#   spring_data <- data_matrix[sample_seasons == "spring" & !is.na(sample_seasons), , drop = FALSE]
+#   summer_data <- data_matrix[sample_seasons == "summer" & !is.na(sample_seasons), , drop = FALSE]
+#   autumn_data <- data_matrix[sample_seasons == "autumn" & !is.na(sample_seasons), , drop = FALSE]
+#   winter_data <- data_matrix[sample_seasons == "winter" & !is.na(sample_seasons), , drop = FALSE]
+#   
+#   # Create list similar to clustering approach
+#   seasons <- list(
+#     full_dataset = data_matrix,
+#     spring = spring_data,
+#     summer = summer_data, 
+#     autumn = autumn_data,
+#     winter = winter_data
+#   )
+#   
+#   return(seasons)
+# }
+# 
+# # Apply seasonal subsetting
+# # Adjust column names to match your actual metadata structure
+# seasons <- create_seasonal_subsets(data_matrix, metadata, 
+#                                  sample_id_col = "sample_id", 
+#                                  date_col = "date")
+# 
+# # Add to global environment (similar to your clustering approach)
+# list2env(seasons, envir = .GlobalEnv)
+# 
+# # Remove full dataset if desired (similar to your clustering approach)
+# seasons[[1]] <- NULL
+# 
+# # Set seed once for reproducibility  
+# set.seed(7683)
+# 
+# # Run phytoclass analysis on full dataset and all seasons independently
+# results_list <- list()
+# for(i in seq_along(seasons)) {
+#   season_name <- names(seasons)[i]
+#   cat("Processing", season_name, "(", i, "of", length(seasons), ")\n")
+#   
+#   # Check if season has enough data (similar to min_cluster_size)
+#   if(nrow(seasons[[i]]) < 14) {
+#     cat("Warning:", season_name, "has only", nrow(seasons[[i]]), "samples - consider combining seasons or using full dataset\n")
+#     next
+#   }
+#   
+#   results_list[[i]] <- simulated_annealing(
+#     S = seasons[[i]], 
+#     F = pigment_matrix,
+#     user_defined_min_max = min_max_matrix, # You'll want season-specific matrices here eventually
+#     do_matrix_checks = T,
+#     niter = 500,
+#     step = 0.09,
+#     weight.upper.bound = 30,
+#     verbose = F
+#   )
+#   
+#   names(results_list)[i] <- season_name
+# }
+# 
+# # Remove NULL elements (seasons with insufficient data)
+# results_list <- results_list[!sapply(results_list, is.null)]
+# 
+# # Print summary of seasonal data sizes
+# cat("\nSeasonal data summary:\n")
+# for(season_name in names(seasons)) {
+#   cat(season_name, ":", nrow(seasons[[season_name]]), "samples\n")
+# }
 ```
 
 
@@ -343,34 +289,34 @@ for(season_name in names(seasons)) {
 
 ```{r}
 #If turned on, this will remove the full dataset from the list - likely not necessary to analyze the full dataset each time, just useful to assess the effect of running the analysis on the individual clusters.
-# clusters[[1]] <- NULL
+clusters[[1]] <- NULL
 ```
 
 
 
 ```{r}
 # Set seed once for reproducibility
-# set.seed(7683)
+set.seed(7683)
 # 
 # # Run phytoclass analysis on full dataset and all clusters independently
-# results_list <- list()
-# for(i in seq_along(clusters)) {
-#   dataset_name <- names(clusters)[i]
-#   cat("Processing", dataset_name, "(", i, "of", length(clusters), ")\n")
-#   
-#   results_list[[i]] <- simulated_annealing(
-#     S = clusters[[i]], 
-#     F = pigment_matrix,
-#     user_defined_min_max = min_max_matrix,
-#     do_matrix_checks = T,
-#     niter = 500, #Kept at one for initial analysis - recommended to be 500.
-#     step = 0.09,
-#     weight.upper.bound = 30,
-#     verbose = F
-#   )
-#   
-#   names(results_list)[i] <- dataset_name
-# }
+results_list <- list()
+for(i in seq_along(clusters)) {
+  dataset_name <- names(clusters)[i]
+  cat("Processing", dataset_name, "(", i, "of", length(clusters), ")\n")
+
+  results_list[[i]] <- simulated_annealing(
+    S = clusters[[i]],
+    F = pigment_matrix,
+    user_defined_min_max = min_max_matrix,
+    do_matrix_checks = T,
+    niter = 500, #Kept at one for initial analysis - recommended to be 500.
+    step = 0.09,
+    weight.upper.bound = 30,
+    verbose = F
+  )
+
+  names(results_list)[i] <- dataset_name
+}
 ```
 
 ```{r}
@@ -383,29 +329,29 @@ cluster_summary <- data.frame(
   # Add a column to distinguish full dataset from clusters
   mutate(
     type = ifelse(dataset == "full_dataset", "Full Dataset", "Cluster"),
-    sample_size = sapply(seasons, nrow)#clusters
+    sample_size = sapply(clusters, nrow)#clusters
   ) %>%
   # Order with full dataset first, then clusters by RMSE
   arrange(type == "Cluster", RMSE)
 
 # Save as CSV for assessment
-write.csv(cluster_summary, here("summaries", "stats_min_lit_raph.csv"),
+write.csv(cluster_summary, here("summaries", "stats_min_lit_d2_cluster.csv"),
           row.names = FALSE)
 ```
 
 ```{r}
 # Function to extract F matrix from a single result and add identifier
-extract_f_matrix <- function(result, season_name) {
+extract_f_matrix <- function(result, clusters) {
   f_matrix <- result$`F matrix`
   
   # Convert to dataframe and add season identifier
   f_df <- as.data.frame(f_matrix)
-  f_df$season <- season_name
+  f_df$clusters <- clusters
   f_df$pigment <- rownames(f_matrix)
   
   # Move identifier columns to front
   f_df <- f_df %>%
-    select(season, pigment, everything())
+    select(clusters, pigment, everything())
   
   return(f_df)
 }
@@ -416,7 +362,7 @@ combined_f_matrices <- map2_dfr(results_list, names(results_list), extract_f_mat
 
 # Optional: Pivot to long format for easier analysis/plotting
 f_matrices_long <- combined_f_matrices %>%
-  pivot_longer(cols = -c(season, pigment), 
+  pivot_longer(cols = -c(clusters, pigment), 
                names_to = "phyto_group", 
                values_to = "ratio") %>%
   # Remove any rows where ratio might be NA or 0 if desired
@@ -437,10 +383,10 @@ pigment_variation <- f_matrices_long %>%
   ) %>%
   arrange(desc(ratio_range))
 
-write.csv(combined_f_matrices, here("summaries", "out_matrix_min_lit_raph.csv"),
+write.csv(combined_f_matrices, here("summaries", "out_matrix_min_lit_d2_cluster.csv"),
           row.names = FALSE)
 
-write.csv(pigment_variation, here("summaries", "out_variation_min_lit_raph.csv"),
+write.csv(pigment_variation, here("summaries", "out_variation_min_lit_d2_cluster.csv"),
           row.names = FALSE)
 
 print("Pigments with highest seasonal variation:")
@@ -496,10 +442,11 @@ output_dm <- extract_class_abundances(results_list) %>%
          cryp = Cryptophytes,
          dino = `Dinoflagellates-1`,
          dict = Dictyophytes,
-         raph = Raphido,
-         diat = D1) %>%
+         # raph = Raphido,
+         diat = D1,
+         D2 = D2) %>%
   # Convert to long format for ggplot
-  pivot_longer(cols = c(GA, cryp, diat, dino, hapt, dict, cyan, raph),
+  pivot_longer(cols = c(GA, cryp, diat, dino, hapt, dict, cyan, D2),
                names_to = "group",
                values_to = "chla") %>%
   # Join metadata
@@ -562,7 +509,7 @@ scale_fill_npg_distinct <- function(...) {
 #Setting plotting order phytoplankton groups
 #Order phytoplankton groups roughly from smallest to largest - create order list
 order_chem <- c("cyan", "hapt", "GA", "cryp",
-                   "dino", "raph", "dict", "raph", "diat")
+                   "dino", "dict", "raph", "diat", "D2")
 
 #Chemtax full data - Specify order of phyto groups for figures
 output_dm <- arrange(mutate(output_dm,
@@ -598,7 +545,31 @@ output_dm %>%
         # axis.text.y = element_blank())
 ```
 
+```{r}
+test <- output_dm %>% 
+  filter(group == "cyan")
 
+test2 <- h %>% 
+  select(date, Zea)
+
+join <- test %>% 
+  full_join(test2)
+
+join %>% 
+  ggplot(aes(x = Zea, y = chla)) +
+  geom_point()
+
+h %>% 
+  mutate(year = year(date),
+         month = month(date)) %>% 
+  filter(year == 2022 & month %in% c(2, 3)) %>% 
+  ggplot(aes(x = date, y = Zea)) +
+  geom_line()
+```
+
+```{r}
+
+```
 
 #See if I can CHEMTAX running in R and compare to my excel analysis
 #Try steepest decsent in phytoclass and CHEMTAX R package.
@@ -611,7 +582,7 @@ output_dm %>%
 #date+v
 #matrix_name
 
-write.csv(output_dm, here("outputs", "manu_min_no_fuco.csv"))
+write.csv(output_dm, here("outputs", "min_lit_raph_diat_fuco_viol.csv"))
 ```
 
 Running 500 iterations took about 35 minutes, but I ran on the full dataset and clusters - could be reduced by not doing full dataset. 
@@ -622,6 +593,11 @@ Start with just straight up comparison
 
 
 I need to research why the clustering approach they use is necessary - I used a different one (Swan et al.). 
+
+```{r}
+
+```
+
 
 ```{r}
 #Trying to run the steepest descent algorithm to also compare with the CHEMTAX results.
